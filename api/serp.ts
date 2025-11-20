@@ -20,6 +20,17 @@ export default async function handler(
   }
 
   try {
+    // The user requested "google-ai-mode-api"
+    // According to docs, engine should be "google_ai_overview" for dedicated API
+    // OR standard google search with params.
+    // Let's stick to standard google search but potentially add specific parameters if needed.
+    // However, the user specifically linked to "https://serpapi.com/google-ai-mode-api"
+    // But for general rank tracking AND AI overview, usually "google" engine is best as it returns organic + features.
+    // If we use "google_ai_overview" engine, we might miss organic results unless we make two calls or if SerpApi aggregates.
+    //
+    // Let's stick to "google" engine but log errors better.
+    // The user error was "API request failed", likely due to non-200 from SerpApi.
+
     const params = new URLSearchParams({
       q: query,
       api_key: apiKey,
@@ -34,7 +45,13 @@ export default async function handler(
     const response = await fetch(`https://serpapi.com/search?${params.toString()}`);
 
     if (!response.ok) {
-      throw new Error(`SERP API error: ${response.status} ${response.statusText}`);
+      // Try to parse error details from SerpApi
+      const errorBody = await response.text();
+      console.error(`SerpApi Failed: ${response.status} ${response.statusText} - ${errorBody}`);
+      return res.status(response.status).json({
+        error: `SerpApi error: ${response.statusText}`,
+        details: errorBody
+      });
     }
 
     const data = await response.json();
@@ -42,6 +59,6 @@ export default async function handler(
 
   } catch (error) {
     console.error('SERP API Error:', error);
-    return res.status(500).json({ error: 'Failed to fetch SERP data' });
+    return res.status(500).json({ error: 'Failed to fetch SERP data', details: (error as Error).message });
   }
 }
