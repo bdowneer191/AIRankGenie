@@ -9,10 +9,20 @@ export default async function handler(
   }
 
   const { query, location = 'United States', device = 'desktop' } = req.body;
-  const apiKey = process.env.SERP_API_KEY;
+
+  // Check multiple common naming conventions for the API key, including the user's specific 'serp_api'
+  const apiKey = process.env.SERP_API_KEY ||
+                 process.env.SERPAPI_API_KEY ||
+                 process.env.SERPAPI_KEY ||
+                 process.env.serp_api ||
+                 process.env.SERP_API;
 
   if (!apiKey) {
-    return res.status(500).json({ error: 'SERP_API_KEY is not configured' });
+    console.error('Missing SERP_API_KEY. Available env vars:', Object.keys(process.env).filter(k => k.toLowerCase().includes('serp') || k.includes('API')));
+    return res.status(500).json({
+      error: 'SERP_API_KEY is not configured',
+      message: 'Please set SERP_API_KEY, SERPAPI_API_KEY, SERPAPI_KEY, or serp_api in your Vercel Project Settings.'
+    });
   }
 
   if (!query) {
@@ -20,17 +30,6 @@ export default async function handler(
   }
 
   try {
-    // The user requested "google-ai-mode-api"
-    // According to docs, engine should be "google_ai_overview" for dedicated API
-    // OR standard google search with params.
-    // Let's stick to standard google search but potentially add specific parameters if needed.
-    // However, the user specifically linked to "https://serpapi.com/google-ai-mode-api"
-    // But for general rank tracking AND AI overview, usually "google" engine is best as it returns organic + features.
-    // If we use "google_ai_overview" engine, we might miss organic results unless we make two calls or if SerpApi aggregates.
-    //
-    // Let's stick to "google" engine but log errors better.
-    // The user error was "API request failed", likely due to non-200 from SerpApi.
-
     const params = new URLSearchParams({
       q: query,
       api_key: apiKey,
