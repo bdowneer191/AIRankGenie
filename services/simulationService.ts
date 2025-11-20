@@ -1,4 +1,4 @@
-import { TrackingJob, TrackingResult, CompetitorResult, MockSerpResponse } from "../types";
+import { TrackingJob, TrackingResult, CompetitorResult } from "../types";
 
 // Simulates a database of jobs
 let jobsStore: TrackingJob[] = [];
@@ -26,47 +26,94 @@ export const createJob = (
   };
   jobsStore.push(newJob);
   
-  // Start background simulation
-  simulateJobProcessing(newJob.id);
+  // Start background processing
+  processJob(newJob.id);
   
   return newJob;
 };
 
-const simulateJobProcessing = (jobId: string) => {
-  // Initial delay to simulate queue
-  setTimeout(() => {
-    updateJobStatus(jobId, 'processing', 5);
-    
-    const job = jobsStore.find(j => j.id === jobId);
-    if (!job) return;
+const processJob = async (jobId: string) => {
+  // Initial delay to simulate queue pick up
+  await new Promise(resolve => setTimeout(resolve, 500));
 
-    let processed = 0;
-    const total = job.queries.length;
-    const results: TrackingResult[] = [];
+  updateJobStatus(jobId, 'processing', 5);
 
-    const processNextQuery = (index: number) => {
-      if (index >= total) {
-        updateJobComplete(jobId, results);
-        return;
-      }
+  const job = jobsStore.find(j => j.id === jobId);
+  if (!job) return;
 
-      const query = job.queries[index];
-      
-      // Simulate API latency (1-3 seconds per query)
-      setTimeout(() => {
-        const mockResult = generateMockSerpResult(query, job.targetUrl);
-        results.push(mockResult);
-        processed++;
-        const progress = Math.round((processed / total) * 100);
-        updateJobStatus(jobId, 'processing', progress);
-        
-        processNextQuery(index + 1);
-      }, 1500 + Math.random() * 1500);
-    };
+  let processed = 0;
+  const total = job.queries.length;
+  const results: TrackingResult[] = [];
 
-    processNextQuery(0);
+  for (const query of job.queries) {
+    try {
+      // Fetch real data from our Vercel function
+      const result = await fetchSerpResult(query, job.targetUrl, job.location, job.device);
+      results.push(result);
+    } catch (error) {
+      console.error(`Failed to fetch SERP for ${query}`, error);
+      // Fallback to mock if API fails or is not configured
+      results.push(generateMockSerpResult(query, job.targetUrl));
+    }
 
-  }, 2000);
+    processed++;
+    const progress = Math.round((processed / total) * 100);
+    updateJobStatus(jobId, 'processing', progress);
+  }
+
+  updateJobComplete(jobId, results);
+};
+
+const fetchSerpResult = async (query: string, targetUrl: string, location: string, device: string): Promise<TrackingResult> => {
+  const response = await fetch('/api/serp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, location, device })
+  });
+
+  if (!response.ok) {
+    throw new Error('API request failed');
+  }
+
+  const data = await response.json();
+  return parseSerpApiResponse(data, query, targetUrl);
+};
+
+const parseSerpApiResponse = (data: any, query: string, targetUrl: string): TrackingResult => {
+  const organicResults = data.organic_results || [];
+  const aiOverview = data.ai_overview;
+
+  // Find rank
+  const targetRank = organicResults.findIndex((r: any) => r.link.includes(targetUrl));
+  const rank = targetRank !== -1 ? targetRank + 1 : null;
+
+  // Map competitors (top 5)
+  const competitors: CompetitorResult[] = organicResults.slice(0, 5).map((r: any) => ({
+    rank: r.position,
+    title: r.title,
+    url: r.link,
+    snippet: r.snippet
+  }));
+
+  // Features
+  const serpFeatures = [];
+  if (data.ai_overview) serpFeatures.push('AI Overview');
+  if (data.knowledge_graph) serpFeatures.push('Knowledge Panel');
+  if (data.related_questions) serpFeatures.push('People Also Ask');
+  if (organicResults.length > 0) serpFeatures.push('Organic');
+
+  return {
+    query,
+    rank,
+    url: targetUrl,
+    history: generateMockHistory(rank), // Keep mock history for now as we don't have a DB
+    aiOverview: {
+      present: !!aiOverview,
+      content: aiOverview ? aiOverview.snippet || "AI Overview present" : undefined
+    },
+    serpFeatures,
+    competitors
+  };
 };
 
 const updateJobStatus = (id: string, status: TrackingJob['status'], progress: number) => {
@@ -89,7 +136,7 @@ const updateJobComplete = (id: string, results: TrackingResult[]) => {
   }
 };
 
-// --- Mock Data Generator ---
+// --- Mock Data Generator (Fallback) ---
 
 const generateMockHistory = (currentRank: number | null) => {
   const history = [];
