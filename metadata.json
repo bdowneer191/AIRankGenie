@@ -1,0 +1,5 @@
+{
+  "name": "AI Rank Tracker",
+  "description": "A professional SERP tracking application featuring real-time rank monitoring, AI-driven analysis using Gemini 2.5 Flash, and competitor insights.",
+  "requestFramePermissions": []
+}
