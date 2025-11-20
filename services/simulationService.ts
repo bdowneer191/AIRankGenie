@@ -72,7 +72,9 @@ const fetchSerpResult = async (query: string, targetUrl: string, location: strin
   });
 
   if (!response.ok) {
-    throw new Error('API request failed');
+    const errorData = await response.json().catch(() => ({}));
+    console.error('SerpApi Error Details:', errorData);
+    throw new Error(`API request failed: ${response.status} - ${JSON.stringify(errorData)}`);
   }
 
   const data = await response.json();
@@ -81,10 +83,14 @@ const fetchSerpResult = async (query: string, targetUrl: string, location: strin
 
 const parseSerpApiResponse = (data: any, query: string, targetUrl: string): TrackingResult => {
   const organicResults = data.organic_results || [];
+  // Handle different AI Overview formats from SerpApi
+  // Sometimes it's "ai_overview", sometimes inside "organic_results" if embedded?
+  // The documentation says "ai_overview" object at root for "google_ai_overview" engine,
+  // but for standard "google" engine, it might be "ai_overview" or "knowledge_graph" etc.
   const aiOverview = data.ai_overview;
 
   // Find rank
-  const targetRank = organicResults.findIndex((r: any) => r.link.includes(targetUrl));
+  const targetRank = organicResults.findIndex((r: any) => r.link && r.link.includes(targetUrl));
   const rank = targetRank !== -1 ? targetRank + 1 : null;
 
   // Map competitors (top 5)
@@ -102,6 +108,22 @@ const parseSerpApiResponse = (data: any, query: string, targetUrl: string): Trac
   if (data.related_questions) serpFeatures.push('People Also Ask');
   if (organicResults.length > 0) serpFeatures.push('Organic');
 
+  // Parse AI Content
+  let aiContent = undefined;
+  if (aiOverview) {
+    if (aiOverview.snippet) {
+      aiContent = aiOverview.snippet;
+    } else if (aiOverview.text_blocks) {
+       // Combine text blocks
+       aiContent = aiOverview.text_blocks
+         .map((b: any) => b.snippet || b.title)
+         .filter(Boolean)
+         .join('\n\n');
+    } else {
+      aiContent = "AI Overview content present";
+    }
+  }
+
   return {
     query,
     rank,
@@ -109,7 +131,7 @@ const parseSerpApiResponse = (data: any, query: string, targetUrl: string): Trac
     history: generateMockHistory(rank), // Keep mock history for now as we don't have a DB
     aiOverview: {
       present: !!aiOverview,
-      content: aiOverview ? aiOverview.snippet || "AI Overview present" : undefined
+      content: aiContent
     },
     serpFeatures,
     competitors
