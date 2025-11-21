@@ -1,4 +1,4 @@
-import { TrackingJob, TrackingResult } from "../types";
+import { TrackingJob, TrackingResult, SearchMode } from "../types";
 
 let localJobsStore: TrackingJob[] = [];
 
@@ -38,12 +38,13 @@ export const createJob = (
   targetUrl: string, 
   queries: string[], 
   location: string, 
-  device: 'desktop' | 'mobile'
+  device: 'desktop' | 'mobile',
+  searchMode: SearchMode = 'google'
 ): TrackingJob => {
   const jobId = `job_${Date.now()}`;
   const createdAt = new Date().toISOString();
 
-  console.log(`Creating job ${jobId} for ${targetUrl} with ${queries.length} queries.`);
+  console.log(`Creating job ${jobId} for ${targetUrl} with ${queries.length} queries. Mode: ${searchMode}`);
 
   const newJob: TrackingJob = {
     id: jobId,
@@ -51,6 +52,7 @@ export const createJob = (
     queries,
     location,
     device,
+    searchMode,
     status: 'processing',
     progress: 0,
     createdAt,
@@ -89,7 +91,8 @@ const processJob = async (job: TrackingJob) => {
         targetUrl: job.targetUrl,
         queries: job.queries,
         location: job.location,
-        device: job.device
+        device: job.device,
+        searchMode: job.searchMode
       })
     });
 

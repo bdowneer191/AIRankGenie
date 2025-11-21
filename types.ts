@@ -1,9 +1,12 @@
+export type SearchMode = 'google' | 'google_ai_mode' | 'google_ask_ai';
+
 export interface TrackingJob {
   id: string;
   targetUrl: string;
   queries: string[];
   location: string;
   device: 'desktop' | 'mobile';
+  searchMode: SearchMode;
   status: 'queued' | 'processing' | 'completed' | 'failed';
   progress: number;
   createdAt: string;
@@ -20,6 +23,7 @@ export interface TrackingResult {
     present: boolean;
     content?: string; // The raw AI overview text (simulated)
     analysis?: string; // The Gemini analysis of the overview
+    type?: string; // To distinguish between AI Overview vs Ask AI response
   };
   serpFeatures: string[];
   competitors: CompetitorResult[];

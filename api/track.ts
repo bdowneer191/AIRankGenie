@@ -1,6 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+import { GoogleGenerativeAI } from "@google/genai";
 
 const mapSerpFeatures = (data: any): string[] => {
   const featureMap: Record<string, string> = {
@@ -61,9 +60,7 @@ const normalizeUrl = (url: string): string => {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Logging entry point
   console.log('API Track Handler started');
-  console.log('Request body:', JSON.stringify(req.body));
 
   // CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -74,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { targetUrl, queries, location = 'United States', device = 'desktop' } = req.body;
+  const { targetUrl, queries, location = 'United States', device = 'desktop', searchMode = 'google' } = req.body;
 
   if (!targetUrl || !queries || !Array.isArray(queries) || queries.length === 0) {
     console.error('Validation error: Missing targetUrl or queries');
@@ -84,11 +81,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.SERP_API_KEY || process.env.SERPAPI_API_KEY || process.env.SERPAPI_KEY;
   const geminiApiKey = process.env.GEMINI_API_KEY;
 
-  console.log('API Keys status:', {
-    serp: !!apiKey,
-    gemini: !!geminiApiKey
-  });
-
   if (!apiKey) {
     console.error('SERP_API_KEY configuration missing');
     return res.status(500).json({ error: 'SERP_API_KEY not configured' });
@@ -97,15 +89,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const normalizedTarget = normalizeUrl(targetUrl);
   console.log('Normalized target URL:', normalizedTarget);
 
-  const results = [];
-
-  for (const query of queries) {
-    console.log(`Processing query: "${query}"`);
+  // Process all queries in parallel using Promise.all
+  const results = await Promise.all(queries.map(async (query: string) => {
+    console.log(`Processing query: "${query}" with mode: ${searchMode}`);
     try {
       const params = new URLSearchParams({
         q: query,
         api_key: apiKey,
-        engine: 'google',
+        engine: searchMode, // Use the provided searchMode ('google', 'google_ai_mode', 'google_ask_ai')
         location: location,
         num: '100',
         hl: 'en',
@@ -113,13 +104,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         device: device
       });
 
-      console.log('Calling SerpAPI...');
+      // Adjust parameters for specific modes if needed
+      // Note: 'google_ai_mode' and 'google_ask_ai' are engines supported by SerpAPI.
+      // If they need specific extra params, we can add them here.
+      // Based on SerpAPI docs, using 'engine' should be sufficient for these modes.
+
+      console.log(`Calling SerpAPI for "${query}"...`);
       const serpRes = await fetch(`https://serpapi.com/search?${params.toString()}`);
-      console.log(`SerpAPI status: ${serpRes.status}`);
 
       if (!serpRes.ok) {
         console.error(`SerpAPI failed for "${query}": ${serpRes.status} ${serpRes.statusText}`);
-        results.push({
+        return {
           query,
           rank: null,
           url: targetUrl,
@@ -127,12 +122,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           aiOverview: { present: false, content: undefined },
           serpFeatures: [],
           competitors: []
-        });
-        continue;
+        };
       }
 
       const data = await serpRes.json();
-      console.log('SerpAPI data received. Parsing...');
+      console.log(`SerpAPI data received for "${query}"`);
 
       // Find rank
       let rank: number | null = null;
@@ -147,7 +141,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
       }
-      console.log(`Found rank: ${rank}`);
 
       // Extract AI Overview
       const aiOverview = {
@@ -155,7 +148,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         content: data.ai_overview?.snippet ||
                  data.ai_overview?.text_blocks?.map((b: any) => b.snippet).join(' ') ||
                  data.ai_overview?.answer ||
-                 (data.ai_overview ? "AI Overview detected" : undefined)
+                 (data.ai_overview ? "AI Overview detected" : undefined),
+        type: searchMode === 'google_ask_ai' ? 'Ask AI' : (data.ai_overview ? 'AI Overview' : undefined)
       };
 
       // Get competitors
@@ -170,32 +164,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let analysis = "Analysis unavailable.";
       if (geminiApiKey) {
         try {
-          console.log('Calling Gemini API...');
+          // Initialize GoogleGenerativeAI
+          const genAI = new GoogleGenerativeAI(geminiApiKey);
+          const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
           const prompt = `Analyze SEO for "${query}". Target rank: ${rank || '>100'}. AI Overview: ${aiOverview.present ? 'Present' : 'None'}. Give ONE actionable tip (max 30 words) to improve ranking or capture AI Overview.`;
 
-          const geminiRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-              })
-            }
-          );
+          const result = await model.generateContent(prompt);
+          const response = await result.response;
+          analysis = response.text();
 
-          console.log(`Gemini API status: ${geminiRes.status}`);
-
-          if (geminiRes.ok) {
-            const geminiData = await geminiRes.json();
-            analysis = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "No analysis generated.";
-          }
         } catch (err) {
-          console.error("Gemini error:", err);
+          console.error(`Gemini error for "${query}":`, err);
         }
       }
 
-      results.push({
+      return {
         query,
         rank,
         url: targetUrl,
@@ -203,16 +187,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aiOverview: { ...aiOverview, analysis },
         serpFeatures: mapSerpFeatures(data),
         competitors
-      });
-
-      // Rate limiting
-      if (queries.indexOf(query) < queries.length - 1) {
-        await sleep(600);
-      }
+      };
 
     } catch (error) {
       console.error(`Error processing "${query}":`, error);
-      results.push({
+      return {
         query,
         rank: null,
         url: targetUrl,
@@ -220,9 +199,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aiOverview: { present: false },
         serpFeatures: [],
         competitors: []
-      });
+      };
     }
-  }
+  }));
 
   console.log(`Job complete. Returning ${results.length} results.`);
   return res.status(200).json({ status: 'completed', results });

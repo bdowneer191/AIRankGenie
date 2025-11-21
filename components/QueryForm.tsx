@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, Input, Button } from './ui/Components';
-import { Search, Plus, X, Globe, Smartphone, Monitor } from 'lucide-react';
+import { Search, Plus, X, Globe, Smartphone, Monitor, Sparkles } from 'lucide-react';
 import { createJob } from '../services/simulationService';
-import { TrackingJob } from '../types';
+import { TrackingJob, SearchMode } from '../types';
 
 interface QueryFormProps {
   onJobCreated: (job: TrackingJob) => void;
@@ -13,6 +13,7 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
   const [currentQuery, setCurrentQuery] = useState('');
   const [queries, setQueries] = useState<string[]>([]);
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
+  const [searchMode, setSearchMode] = useState<SearchMode>('google');
   const [location, setLocation] = useState('United States');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -33,7 +34,7 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
     
     setIsLoading(true);
     try {
-      const job = createJob(targetUrl, queries, location, device);
+      const job = createJob(targetUrl, queries, location, device, searchMode);
       onJobCreated(job);
 
       // Reset form
@@ -128,6 +129,31 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
                value={location}
                onChange={(e) => setLocation(e.target.value)}
              />
+          </div>
+        </div>
+
+        {/* Search Mode Selection */}
+        <div className="space-y-3">
+          <label className="text-sm font-semibold text-gray-900">Search Engine Mode</label>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={() => setSearchMode('google')}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium rounded-lg border transition-all ${searchMode === 'google' ? 'bg-blue-50 border-blue-200 text-blue-700 ring-1 ring-blue-200' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+            >
+              <Search className="h-4 w-4" /> Standard Google
+            </button>
+            <button
+              onClick={() => setSearchMode('google_ai_mode')}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium rounded-lg border transition-all ${searchMode === 'google_ai_mode' ? 'bg-purple-50 border-purple-200 text-purple-700 ring-1 ring-purple-200' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+            >
+              <Sparkles className="h-4 w-4" /> AI Overview (SGE)
+            </button>
+            <button
+              onClick={() => setSearchMode('google_ask_ai')}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium rounded-lg border transition-all ${searchMode === 'google_ask_ai' ? 'bg-green-50 border-green-200 text-green-700 ring-1 ring-green-200' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+            >
+              <Monitor className="h-4 w-4" /> Ask AI
+            </button>
           </div>
         </div>
 
