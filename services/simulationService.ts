@@ -2,7 +2,7 @@ import { TrackingJob, TrackingResult } from "../types";
 
 let localJobsStore: TrackingJob[] = [];
 
-// --- Persistence Helpers ---
+// --- Persistence ---
 const loadFromStorage = () => {
   if (typeof window !== 'undefined') {
     try {
@@ -21,7 +21,7 @@ const saveToStorage = () => {
 // Initialize
 loadFromStorage();
 
-// --- CRUD Operations ---
+// --- CRUD ---
 export const getJobs = (): TrackingJob[] => {
   return [...localJobsStore].sort((a, b) => 
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -38,7 +38,7 @@ export const clearAllJobs = () => {
   saveToStorage();
 };
 
-// --- Job Creation & Orchestration ---
+// --- Batch Processing Orchestrator ---
 export const createJob = (
   targetUrl: string, 
   queries: string[], 
@@ -61,42 +61,38 @@ export const createJob = (
     results: []
   };
 
-  // Save initial state
   localJobsStore = [newJob, ...localJobsStore];
   saveToStorage();
 
-  // Start the Client-Side Batching Process
-  processJobInBatches(newJob);
+  // Start processing in background
+  processJobQueue(newJob);
   
   return newJob;
 };
 
-// --- The Batch Processor ---
-const processJobInBatches = async (job: TrackingJob) => {
-  const BATCH_SIZE = 1; // Process 1 keyword at a time to be perfectly safe
-  let completedCount = 0;
+const processJobQueue = async (job: TrackingJob) => {
+  const BATCH_SIZE = 1; // 1 keyword at a time to avoid Vercel timeouts
   let allResults: TrackingResult[] = [];
+  let processedCount = 0;
 
-  // 1. Clone the queries to process
+  // Clone queries to avoid mutation issues
   const queue = [...job.queries];
 
-  // 2. Update status
+  // Initial Status
   updateJobState(job.id, { status: 'processing', progress: 5 });
 
-  // 3. Iterate through the queue
   for (let i = 0; i < queue.length; i += BATCH_SIZE) {
     const batch = queue.slice(i, i + BATCH_SIZE);
     
     try {
-      // Call the API for just this small batch
-      console.log(`[Job ${job.id}] Processing batch: ${batch.join(', ')}`);
+      console.log(`[Orchestrator] Sending batch: ${batch}`);
       
       const response = await fetch('/api/track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           targetUrl: job.targetUrl,
-          queries: batch, // Only sending 1 keyword
+          queries: batch,
           location: job.location,
           device: job.device,
           searchMode: job.searchMode
@@ -106,51 +102,39 @@ const processJobInBatches = async (job: TrackingJob) => {
       if (!response.ok) throw new Error(`API Error: ${response.status}`);
 
       const data = await response.json();
-      const newResults = data.results || [];
+      allResults = [...allResults, ...(data.results || [])];
+      processedCount += batch.length;
 
-      // Accumulate results
-      allResults = [...allResults, ...newResults];
-      completedCount += batch.length;
-
-      // Calculate Progress
-      const progress = Math.round((completedCount / job.queries.length) * 100);
-
-      // Update Store Incrementally (Real-time feedback!)
+      // Real-time Progress Update
+      const progress = Math.round((processedCount / job.queries.length) * 100);
+      
       updateJobState(job.id, {
         progress,
         results: allResults,
-        // Only mark completed if we hit 100%
         status: progress === 100 ? 'completed' : 'processing',
         completedAt: progress === 100 ? new Date().toISOString() : undefined
       });
 
     } catch (error) {
-      console.error(`[Job ${job.id}] Batch failed for ${batch}:`, error);
+      console.error(`[Orchestrator] Batch failed:`, error);
       
-      // Add failed results so the report isn't empty
+      // Add error placeholders so report completes
       const failedResults = batch.map(q => ({
-        query: q,
-        rank: null,
-        url: job.targetUrl,
-        history: [],
-        aiOverview: { present: false, content: "Failed to fetch" },
-        serpFeatures: [],
-        competitors: []
+        query: q, rank: null, url: job.targetUrl, history: [],
+        aiOverview: { present: false, content: "Check failed" },
+        serpFeatures: [], competitors: []
       }));
-      
       allResults = [...allResults, ...failedResults];
-      completedCount += batch.length;
-      
-      // Update state even on error to keep progress moving
+      processedCount += batch.length;
+
       updateJobState(job.id, {
-        progress: Math.round((completedCount / job.queries.length) * 100),
+        progress: Math.round((processedCount / job.queries.length) * 100),
         results: allResults
       });
     }
   }
 };
 
-// Helper to safely update state
 const updateJobState = (id: string, updates: Partial<TrackingJob>) => {
   const idx = localJobsStore.findIndex(j => j.id === id);
   if (idx !== -1) {
