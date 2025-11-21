@@ -1,36 +1,18 @@
-import { TrackingJob, TrackingResult, SearchMode } from "../types";
+import { TrackingJob } from "../types";
 
 let localJobsStore: TrackingJob[] = [];
 
 // Load from localStorage on init
-const loadFromStorage = () => {
+if (typeof window !== 'undefined') {
   try {
     const stored = localStorage.getItem('rankTrackerJobs');
-    if (stored) {
-      localJobsStore = JSON.parse(stored);
-    }
-  } catch (e) {
-    console.error('Failed to load jobs from storage:', e);
-  }
-};
+    if (stored) localJobsStore = JSON.parse(stored);
+  } catch (e) { console.error('Storage load error', e); }
+}
 
-// Save to localStorage
 const saveToStorage = () => {
-  try {
+  if (typeof window !== 'undefined') {
     localStorage.setItem('rankTrackerJobs', JSON.stringify(localJobsStore));
-  } catch (e) {
-    console.error('Failed to save jobs to storage:', e);
-  }
-};
-
-// Initialize on module load
-loadFromStorage();
-
-const updateJob = (id: string, updates: Partial<TrackingJob>) => {
-  const idx = localJobsStore.findIndex(j => j.id === id);
-  if (idx !== -1) {
-    localJobsStore[idx] = { ...localJobsStore[idx], ...updates };
-    saveToStorage();
   }
 };
 
@@ -39,12 +21,9 @@ export const createJob = (
   queries: string[], 
   location: string, 
   device: 'desktop' | 'mobile',
-  searchMode: SearchMode = 'google'
+  searchMode: 'google' | 'google_ai_mode' | 'google_ask_ai' // Added mode
 ): TrackingJob => {
   const jobId = `job_${Date.now()}`;
-  const createdAt = new Date().toISOString();
-
-  console.log(`Creating job ${jobId} for ${targetUrl} with ${queries.length} queries. Mode: ${searchMode}`);
 
   const newJob: TrackingJob = {
     id: jobId,
@@ -54,36 +33,23 @@ export const createJob = (
     device,
     searchMode,
     status: 'processing',
-    progress: 0,
-    createdAt,
+    progress: 10,
+    createdAt: new Date().toISOString(),
     results: []
   };
 
-  localJobsStore.push(newJob);
+  // Add to local store immediately
+  localJobsStore = [newJob, ...localJobsStore];
   saveToStorage();
 
-  // Start async processing
-  processJob(newJob);
+  // Trigger the API call
+  runBackendJob(newJob);
   
   return newJob;
 };
 
-const simulateProgress = (jobId: string, totalQueries: number): NodeJS.Timeout => {
-  let currentProgress = 0;
-  const increment = 80 / (totalQueries * 2); // Reach ~80% during processing
-
-  return setInterval(() => {
-    currentProgress = Math.min(currentProgress + increment, 80);
-    updateJob(jobId, { progress: Math.round(currentProgress) });
-  }, 500);
-};
-
-const processJob = async (job: TrackingJob) => {
-  console.log(`Starting processing for job ${job.id}...`);
-  const progressInterval = simulateProgress(job.id, job.queries.length);
-
+const runBackendJob = async (job: TrackingJob) => {
   try {
-    console.log('Sending request to /api/track...');
     const response = await fetch('/api/track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -92,53 +58,49 @@ const processJob = async (job: TrackingJob) => {
         queries: job.queries,
         location: job.location,
         device: job.device,
-        searchMode: job.searchMode
+        searchMode: job.searchMode // Pass the mode to API
       })
     });
 
-    console.log(`Response status for job ${job.id}: ${response.status}`);
-
-    clearInterval(progressInterval);
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error(`API request failed for job ${job.id}:`, errorData);
-      throw new Error(errorData.error || `API error: ${response.status}`);
-    }
+    if (!response.ok) throw new Error('Network response was not ok');
 
     const data = await response.json();
-    console.log(`Job ${job.id} completed successfully with ${data.results?.length || 0} results.`);
 
-    updateJob(job.id, {
-      status: 'completed',
-      progress: 100,
-      results: data.results || [],
-      completedAt: new Date().toISOString()
-    });
+    // Update job with results
+    const idx = localJobsStore.findIndex(j => j.id === job.id);
+    if (idx !== -1) {
+      localJobsStore[idx] = {
+        ...localJobsStore[idx],
+        status: 'completed',
+        progress: 100,
+        results: data.results || [],
+        completedAt: new Date().toISOString()
+      };
+      saveToStorage();
+    }
 
   } catch (error) {
-    clearInterval(progressInterval);
-    console.error("Job Failed:", error);
-    updateJob(job.id, {
-      status: 'failed',
-      progress: 0,
-      completedAt: new Date().toISOString()
-    });
+    console.error("Tracking failed:", error);
+    const idx = localJobsStore.findIndex(j => j.id === job.id);
+    if (idx !== -1) {
+      localJobsStore[idx] = {
+        ...localJobsStore[idx],
+        status: 'failed',
+        progress: 0
+      };
+      saveToStorage();
+    }
   }
 };
 
-export const getJobs = (): TrackingJob[] => {
-  return [...localJobsStore].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-};
+export const getJobs = (): TrackingJob[] => [...localJobsStore];
 
-export const deleteJob = (id: string): void => {
+export const deleteJob = (id: string) => {
   localJobsStore = localJobsStore.filter(j => j.id !== id);
   saveToStorage();
 };
 
-export const clearAllJobs = (): void => {
+export const clearAllJobs = () => {
   localJobsStore = [];
   saveToStorage();
 };
