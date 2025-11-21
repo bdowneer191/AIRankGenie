@@ -1,14 +1,16 @@
-import { TrackingJob } from "../types";
+import { TrackingJob, TrackingResult } from "../types";
 
 let localJobsStore: TrackingJob[] = [];
 
-// Load from localStorage
-if (typeof window !== 'undefined') {
-  try {
-    const stored = localStorage.getItem('rankTrackerJobs');
-    if (stored) localJobsStore = JSON.parse(stored);
-  } catch (e) { console.error("Storage Error", e); }
-}
+// --- Persistence Helpers ---
+const loadFromStorage = () => {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('rankTrackerJobs');
+      if (stored) localJobsStore = JSON.parse(stored);
+    } catch (e) { console.error("Storage Load Error", e); }
+  }
+};
 
 const saveToStorage = () => {
   if (typeof window !== 'undefined') {
@@ -16,6 +18,27 @@ const saveToStorage = () => {
   }
 };
 
+// Initialize
+loadFromStorage();
+
+// --- CRUD Operations ---
+export const getJobs = (): TrackingJob[] => {
+  return [...localJobsStore].sort((a, b) => 
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+};
+
+export const deleteJob = (id: string) => {
+  localJobsStore = localJobsStore.filter(j => j.id !== id);
+  saveToStorage();
+};
+
+export const clearAllJobs = () => {
+  localJobsStore = [];
+  saveToStorage();
+};
+
+// --- Job Creation & Orchestration ---
 export const createJob = (
   targetUrl: string, 
   queries: string[], 
@@ -31,77 +54,107 @@ export const createJob = (
     queries,
     location,
     device,
-    searchMode, // Save the mode
+    searchMode,
     status: 'processing',
-    progress: 5,
+    progress: 0,
     createdAt: new Date().toISOString(),
     results: []
   };
 
+  // Save initial state
   localJobsStore = [newJob, ...localJobsStore];
   saveToStorage();
 
-  // Start the API call
-  runBackendJob(newJob);
+  // Start the Client-Side Batching Process
+  processJobInBatches(newJob);
   
   return newJob;
 };
 
-const runBackendJob = async (job: TrackingJob) => {
-  try {
-    const response = await fetch('/api/track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        targetUrl: job.targetUrl,
-        queries: job.queries,
-        location: job.location,
-        device: job.device,
-        searchMode: job.searchMode // Pass mode to backend
-      })
-    });
+// --- The Batch Processor ---
+const processJobInBatches = async (job: TrackingJob) => {
+  const BATCH_SIZE = 1; // Process 1 keyword at a time to be perfectly safe
+  let completedCount = 0;
+  let allResults: TrackingResult[] = [];
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API Error: ${errorText}`);
-    }
+  // 1. Clone the queries to process
+  const queue = [...job.queries];
 
-    const data = await response.json();
+  // 2. Update status
+  updateJobState(job.id, { status: 'processing', progress: 5 });
 
-    const idx = localJobsStore.findIndex(j => j.id === job.id);
-    if (idx !== -1) {
-      localJobsStore[idx] = {
-        ...localJobsStore[idx],
-        status: 'completed',
-        progress: 100,
-        results: data.results || [],
-        completedAt: new Date().toISOString()
-      };
-      saveToStorage();
-    }
+  // 3. Iterate through the queue
+  for (let i = 0; i < queue.length; i += BATCH_SIZE) {
+    const batch = queue.slice(i, i + BATCH_SIZE);
+    
+    try {
+      // Call the API for just this small batch
+      console.log(`[Job ${job.id}] Processing batch: ${batch.join(', ')}`);
+      
+      const response = await fetch('/api/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetUrl: job.targetUrl,
+          queries: batch, // Only sending 1 keyword
+          location: job.location,
+          device: job.device,
+          searchMode: job.searchMode
+        })
+      });
 
-  } catch (error) {
-    console.error("Tracking Error:", error);
-    const idx = localJobsStore.findIndex(j => j.id === job.id);
-    if (idx !== -1) {
-      localJobsStore[idx] = {
-        ...localJobsStore[idx],
-        status: 'failed',
-        progress: 0
-      };
-      saveToStorage();
+      if (!response.ok) throw new Error(`API Error: ${response.status}`);
+
+      const data = await response.json();
+      const newResults = data.results || [];
+
+      // Accumulate results
+      allResults = [...allResults, ...newResults];
+      completedCount += batch.length;
+
+      // Calculate Progress
+      const progress = Math.round((completedCount / job.queries.length) * 100);
+
+      // Update Store Incrementally (Real-time feedback!)
+      updateJobState(job.id, {
+        progress,
+        results: allResults,
+        // Only mark completed if we hit 100%
+        status: progress === 100 ? 'completed' : 'processing',
+        completedAt: progress === 100 ? new Date().toISOString() : undefined
+      });
+
+    } catch (error) {
+      console.error(`[Job ${job.id}] Batch failed for ${batch}:`, error);
+      
+      // Add failed results so the report isn't empty
+      const failedResults = batch.map(q => ({
+        query: q,
+        rank: null,
+        url: job.targetUrl,
+        history: [],
+        aiOverview: { present: false, content: "Failed to fetch" },
+        serpFeatures: [],
+        competitors: []
+      }));
+      
+      allResults = [...allResults, ...failedResults];
+      completedCount += batch.length;
+      
+      // Update state even on error to keep progress moving
+      updateJobState(job.id, {
+        progress: Math.round((completedCount / job.queries.length) * 100),
+        results: allResults
+      });
     }
   }
 };
 
-export const getJobs = (): TrackingJob[] => [...localJobsStore];
-
-export const deleteJob = (id: string) => {
-  localJobsStore = localJobsStore.filter(j => j.id !== id);
-  saveToStorage();
-};
-
-export const clearAllJobs = () => {
-  localJobsStore = [];
-  saveToStorage();
+// Helper to safely update state
+const updateJobState = (id: string, updates: Partial<TrackingJob>) => {
+  const idx = localJobsStore.findIndex(j => j.id === id);
+  if (idx !== -1) {
+    localJobsStore[idx] = { ...localJobsStore[idx], ...updates };
+    saveToStorage();
+  }
 };
