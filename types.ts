@@ -36,6 +36,29 @@ export interface ApiConfig {
   geminiApiKey: string;
 }
 
+export interface SerpApiResponse {
+  organic_results?: Array<{
+    position: number;
+    title: string;
+    link: string;
+    snippet: string;
+  }>;
+  ai_overview?: {
+    snippet?: string;
+    text_blocks?: Array<{ snippet: string }>;
+    answer?: string;
+  };
+  featured_snippet?: object;
+  people_also_ask?: object;
+  knowledge_panel?: object;
+  local_results?: object;
+  top_stories?: object;
+  video_results?: object;
+  image_results?: object;
+  shopping_results?: object;
+  sitelinks?: object;
+}
+
 // Mock Data Interface for simulation
 export interface MockSerpResponse {
   organic_results: { position: number; title: string; link: string; snippet: string }[];
