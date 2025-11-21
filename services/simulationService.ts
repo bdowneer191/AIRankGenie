@@ -2,12 +2,12 @@ import { TrackingJob } from "../types";
 
 let localJobsStore: TrackingJob[] = [];
 
-// Load from storage on init
+// Load from localStorage
 if (typeof window !== 'undefined') {
   try {
     const stored = localStorage.getItem('rankTrackerJobs');
     if (stored) localJobsStore = JSON.parse(stored);
-  } catch (e) { console.error('Storage load error', e); }
+  } catch (e) { console.error("Storage Error", e); }
 }
 
 const saveToStorage = () => {
@@ -31,9 +31,9 @@ export const createJob = (
     queries,
     location,
     device,
-    searchMode,
+    searchMode, // Save the mode
     status: 'processing',
-    progress: 5, // Start with some progress
+    progress: 5,
     createdAt: new Date().toISOString(),
     results: []
   };
@@ -41,7 +41,7 @@ export const createJob = (
   localJobsStore = [newJob, ...localJobsStore];
   saveToStorage();
 
-  // Execute API call
+  // Start the API call
   runBackendJob(newJob);
   
   return newJob;
@@ -57,18 +57,17 @@ const runBackendJob = async (job: TrackingJob) => {
         queries: job.queries,
         location: job.location,
         device: job.device,
-        searchMode: job.searchMode
+        searchMode: job.searchMode // Pass mode to backend
       })
     });
 
     if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`Server Error: ${err}`);
+      const errorText = await response.text();
+      throw new Error(`API Error: ${errorText}`);
     }
 
     const data = await response.json();
 
-    // Update job on success
     const idx = localJobsStore.findIndex(j => j.id === job.id);
     if (idx !== -1) {
       localJobsStore[idx] = {
@@ -82,7 +81,7 @@ const runBackendJob = async (job: TrackingJob) => {
     }
 
   } catch (error) {
-    console.error("Tracking Job Failed:", error);
+    console.error("Tracking Error:", error);
     const idx = localJobsStore.findIndex(j => j.id === job.id);
     if (idx !== -1) {
       localJobsStore[idx] = {
