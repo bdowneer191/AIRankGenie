@@ -2,7 +2,7 @@ import { TrackingJob } from "../types";
 
 let localJobsStore: TrackingJob[] = [];
 
-// Load from localStorage on init
+// Load from storage on init
 if (typeof window !== 'undefined') {
   try {
     const stored = localStorage.getItem('rankTrackerJobs');
@@ -21,10 +21,10 @@ export const createJob = (
   queries: string[], 
   location: string, 
   device: 'desktop' | 'mobile',
-  searchMode: 'google' | 'google_ai_mode' | 'google_ask_ai' // Added mode
+  searchMode: 'google' | 'google_ai_mode' | 'google_ask_ai'
 ): TrackingJob => {
   const jobId = `job_${Date.now()}`;
-
+  
   const newJob: TrackingJob = {
     id: jobId,
     targetUrl,
@@ -33,16 +33,15 @@ export const createJob = (
     device,
     searchMode,
     status: 'processing',
-    progress: 10,
+    progress: 5, // Start with some progress
     createdAt: new Date().toISOString(),
     results: []
   };
 
-  // Add to local store immediately
   localJobsStore = [newJob, ...localJobsStore];
   saveToStorage();
 
-  // Trigger the API call
+  // Execute API call
   runBackendJob(newJob);
   
   return newJob;
@@ -58,15 +57,18 @@ const runBackendJob = async (job: TrackingJob) => {
         queries: job.queries,
         location: job.location,
         device: job.device,
-        searchMode: job.searchMode // Pass the mode to API
+        searchMode: job.searchMode
       })
     });
 
-    if (!response.ok) throw new Error('Network response was not ok');
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Server Error: ${err}`);
+    }
 
     const data = await response.json();
 
-    // Update job with results
+    // Update job on success
     const idx = localJobsStore.findIndex(j => j.id === job.id);
     if (idx !== -1) {
       localJobsStore[idx] = {
@@ -80,7 +82,7 @@ const runBackendJob = async (job: TrackingJob) => {
     }
 
   } catch (error) {
-    console.error("Tracking failed:", error);
+    console.error("Tracking Job Failed:", error);
     const idx = localJobsStore.findIndex(j => j.id === job.id);
     if (idx !== -1) {
       localJobsStore[idx] = {
