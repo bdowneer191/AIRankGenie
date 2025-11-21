@@ -1,5 +1,5 @@
 import React from 'react';
-import { getJobs } from '../services/simulationService';
+import { getJobs } from '../services/trackingService'; // <--- Updated Import
 import { Card, CardHeader, CardTitle, CardContent } from './ui/Components';
 import { TrendingUp, Target, Sparkles, Award } from 'lucide-react';
 
@@ -51,10 +51,10 @@ const AnalyticsPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in">
       <div>
         <h2 className="text-3xl font-bold text-primary">Analytics</h2>
-        <p className="text-gray-500 mt-1">Overview of your tracking performance</p>
+        <p className="text-gray-500 mt-1">Performance Overview</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -90,7 +90,7 @@ const AnalyticsPage: React.FC = () => {
       )}
 
       {allResults.length === 0 && (
-        <div className="text-center py-20 bg-gray-50 rounded-xl border-2 border-dashed">
+        <div className="text-center py-20 bg-white rounded-xl border-2 border-dashed">
           <p className="text-gray-500">No data yet. Complete some tracking jobs to see analytics.</p>
         </div>
       )}
