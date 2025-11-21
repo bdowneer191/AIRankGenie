@@ -20,8 +20,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
     return () => clearInterval(interval);
   }, []);
 
-  const activeJobs = jobs.filter(j => j.status === 'queued' || j.status === 'processing');
-  const completedJobs = jobs.filter(j => j.status === 'completed' || j.status === 'failed');
+  const safeJobs = jobs || [];
+  const activeJobs = safeJobs.filter(j => j.status === 'queued' || j.status === 'processing');
+  const completedJobs = safeJobs.filter(j => j.status === 'completed' || j.status === 'failed');
 
   return (
     <div className="space-y-8">

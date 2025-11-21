@@ -39,7 +39,7 @@ const processJob = async (job: TrackingJob) => {
   localJobsStore.push(job);
   
   try {
-    const response = await fetch('http://localhost:3001/api/track', {
+    const response = await fetch('/api/track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
