@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, Input, Button } from './ui/Components';
-import { Search, Plus, X, Globe, Smartphone, Monitor, Sparkles } from 'lucide-react';
+import { Search, Plus, X, Globe, Smartphone, Monitor, Bot, Sparkles } from 'lucide-react';
 import { createJob } from '../services/simulationService';
 import { TrackingJob, SearchMode } from '../types';
 
@@ -13,8 +13,8 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
   const [currentQuery, setCurrentQuery] = useState('');
   const [queries, setQueries] = useState<string[]>([]);
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
-  const [searchMode, setSearchMode] = useState<SearchMode>('google');
   const [location, setLocation] = useState('United States');
+  const [searchMode, setSearchMode] = useState<SearchMode>('google');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleAddQuery = (e?: React.FormEvent) => {
@@ -34,15 +34,16 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
     
     setIsLoading(true);
     try {
+      // Pass searchMode to createJob
       const job = createJob(targetUrl, queries, location, device, searchMode);
       onJobCreated(job);
 
-      // Reset form
+      // Reset
       setTargetUrl('');
       setQueries([]);
       setCurrentQuery('');
-    } catch (e) {
-      console.error("Error creating job:", e);
+    } catch (error) {
+      console.error(error);
     } finally {
       setIsLoading(false);
     }
@@ -52,7 +53,7 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
     <Card className="max-w-2xl mx-auto shadow-lg border-0 ring-1 ring-gray-200">
       <CardHeader className="border-b border-gray-100 bg-gray-50/50 pb-8">
         <CardTitle className="text-2xl text-primary">Start New Tracking Job</CardTitle>
-        <p className="text-gray-500 mt-2">Monitor your search engine rankings and AI Overview presence.</p>
+        <p className="text-gray-500 mt-2">Monitor rankings across Google, AI Mode, or Ask AI.</p>
       </CardHeader>
       <CardContent className="space-y-8 pt-8">
         
@@ -68,6 +69,36 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
               className="pl-10 font-mono"
             />
           </div>
+        </div>
+
+        {/* Tracking Mode Selection */}
+        <div className="space-y-3">
+          <label className="text-sm font-semibold text-gray-900">Tracking Mode</label>
+          <div className="grid grid-cols-3 gap-2 p-1 bg-gray-100 rounded-lg">
+            <button
+              onClick={() => setSearchMode('google')}
+              className={`flex items-center justify-center gap-2 py-2 text-xs sm:text-sm font-medium rounded-md transition-all ${searchMode === 'google' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+            >
+              <Search className="h-4 w-4" /> Standard
+            </button>
+            <button
+              onClick={() => setSearchMode('google_ai_mode')}
+              className={`flex items-center justify-center gap-2 py-2 text-xs sm:text-sm font-medium rounded-md transition-all ${searchMode === 'google_ai_mode' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-purple-600'}`}
+            >
+              <Sparkles className="h-4 w-4" /> AI Mode
+            </button>
+            <button
+              onClick={() => setSearchMode('google_ask_ai')}
+              className={`flex items-center justify-center gap-2 py-2 text-xs sm:text-sm font-medium rounded-md transition-all ${searchMode === 'google_ask_ai' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-indigo-600'}`}
+            >
+              <Bot className="h-4 w-4" /> Ask AI
+            </button>
+          </div>
+          <p className="text-xs text-gray-500">
+            {searchMode === 'google' && "Standard Google organic rankings + AI Overview detection."}
+            {searchMode === 'google_ai_mode' && "Tracks citation rankings inside Google's generative AI results."}
+            {searchMode === 'google_ask_ai' && "Monitors responses from the 'Ask AI' feature."}
+          </p>
         </div>
 
         {/* Keywords Input */}
@@ -88,82 +119,24 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
               <Plus className="h-4 w-4" />
             </Button>
           </div>
-          
-          {/* Keyword Tags */}
-          <div className="flex flex-wrap gap-2 min-h-[40px] p-4 bg-gray-50 rounded-lg border border-gray-100">
-            {queries.length === 0 && <span className="text-sm text-gray-400 italic">No keywords added yet...</span>}
+          <div className="flex flex-wrap gap-2 min-h-[40px]">
             {queries.map((q, i) => (
-              <span key={i} className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-gray-200 text-sm font-medium text-gray-700 shadow-sm">
+              <span key={i} className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-gray-200 text-sm font-medium text-gray-700">
                 {q}
-                <button onClick={() => handleRemoveQuery(i)} className="text-gray-400 hover:text-red-500">
-                  <X className="h-3 w-3" />
-                </button>
+                <button onClick={() => handleRemoveQuery(i)}><X className="h-3 w-3 text-gray-400 hover:text-red-500" /></button>
               </span>
             ))}
           </div>
         </div>
 
-        {/* Settings Grid */}
-        <div className="grid grid-cols-2 gap-6">
-          <div className="space-y-3">
-             <label className="text-sm font-semibold text-gray-900">Device Type</label>
-             <div className="flex p-1 bg-gray-100 rounded-lg">
-               <button 
-                 onClick={() => setDevice('desktop')}
-                 className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all ${device === 'desktop' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-               >
-                 <Monitor className="h-4 w-4" /> Desktop
-               </button>
-               <button 
-                 onClick={() => setDevice('mobile')}
-                 className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all ${device === 'mobile' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-               >
-                 <Smartphone className="h-4 w-4" /> Mobile
-               </button>
-             </div>
-          </div>
-          
-          <div className="space-y-3">
-             <label className="text-sm font-semibold text-gray-900">Location</label>
-             <Input 
-               value={location}
-               onChange={(e) => setLocation(e.target.value)}
-             />
-          </div>
-        </div>
-
-        {/* Search Mode Selection */}
-        <div className="space-y-3">
-          <label className="text-sm font-semibold text-gray-900">Search Engine Mode</label>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              onClick={() => setSearchMode('google')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium rounded-lg border transition-all ${searchMode === 'google' ? 'bg-blue-50 border-blue-200 text-blue-700 ring-1 ring-blue-200' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-            >
-              <Search className="h-4 w-4" /> Standard Google
-            </button>
-            <button
-              onClick={() => setSearchMode('google_ai_mode')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium rounded-lg border transition-all ${searchMode === 'google_ai_mode' ? 'bg-purple-50 border-purple-200 text-purple-700 ring-1 ring-purple-200' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-            >
-              <Sparkles className="h-4 w-4" /> AI Overview (SGE)
-            </button>
-            <button
-              onClick={() => setSearchMode('google_ask_ai')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium rounded-lg border transition-all ${searchMode === 'google_ask_ai' ? 'bg-green-50 border-green-200 text-green-700 ring-1 ring-green-200' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-            >
-              <Monitor className="h-4 w-4" /> Ask AI
-            </button>
-          </div>
-        </div>
-
+        {/* Submit */}
         <div className="pt-4 border-t border-gray-100">
           <Button 
             onClick={handleSubmit} 
             className="w-full h-12 text-base shadow-lg shadow-primary/20" 
             disabled={!targetUrl || queries.length === 0 || isLoading}
           >
-            {isLoading ? "Starting..." : `Start Tracking ${queries.length > 0 ? `(${queries.length} keywords)` : ''}`}
+            {isLoading ? "Initializing Job..." : "Start Tracking"}
           </Button>
         </div>
 
