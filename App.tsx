@@ -3,8 +3,9 @@ import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import QueryForm from './components/QueryForm';
 import JobDetailView from './components/JobDetailView';
+import HistoryPage from './components/HistoryPage';
+import AnalyticsPage from './components/AnalyticsPage';
 import { TrackingJob } from './types';
-import { HashRouter, Route, Routes } from 'react-router-dom';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -31,6 +32,17 @@ const App: React.FC = () => {
             }} 
           />
         );
+      case 'history':
+        return (
+          <HistoryPage
+            onViewJob={(job) => {
+              setSelectedJob(job);
+              setCurrentView('details');
+            }}
+          />
+        );
+      case 'analytics':
+        return <AnalyticsPage />;
       case 'dashboard':
       default:
         return (

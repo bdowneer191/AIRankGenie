@@ -55,8 +55,12 @@ const RankHistoryChart: React.FC<{ history: { date: string; rank: number | null 
   // Filter out nulls for range calculation
   const validRanks = history.map(h => h.rank).filter((r): r is number => r !== null);
   
-  if (validRanks.length === 0) {
-    return <div className="h-[50px] w-[160px] flex items-center justify-center text-[10px] text-gray-300 border border-gray-100 rounded bg-gray-50/50">No history data</div>;
+  if (!history || history.length === 0 || validRanks.length === 0) {
+    return (
+      <div className="h-[50px] w-[160px] flex items-center justify-center text-[10px] text-gray-300 border border-gray-100 rounded bg-gray-50/50">
+        No history data
+      </div>
+    );
   }
 
   const minRank = Math.min(...validRanks);

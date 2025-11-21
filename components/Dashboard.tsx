@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { TrackingJob } from '../types';
-import { getJobs } from '../services/simulationService';
+import { getJobs, deleteJob } from '../services/simulationService';
 import { Card, CardContent, CardHeader, CardTitle, Badge, Button } from './ui/Components';
-import { Clock, ArrowRight, BarChart3, Loader2, AlertCircle } from 'lucide-react';
+import { Clock, ArrowRight, BarChart3, Loader2, AlertCircle, Trash2 } from 'lucide-react';
 
 interface DashboardProps {
   onViewJob: (job: TrackingJob) => void;
@@ -23,6 +23,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
 
     return () => clearInterval(interval);
   }, []);
+
+  const handleDeleteJob = (jobId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm('Are you sure you want to delete this report?')) {
+      deleteJob(jobId);
+      setJobs(getJobs());
+    }
+  };
 
   const safeJobs = jobs || [];
   const activeJobs = safeJobs.filter(j => j.status === 'queued' || j.status === 'processing');
@@ -127,6 +135,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
                   </div>
 
                   <ArrowRight className="w-5 h-5 text-gray-300 group-hover:text-primary transition-colors" />
+                  <button
+                    onClick={(e) => handleDeleteJob(job.id, e)}
+                    className="p-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                    title="Delete report"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </CardContent>
             </Card>
