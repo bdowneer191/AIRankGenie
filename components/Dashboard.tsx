@@ -13,10 +13,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
   const [jobs, setJobs] = useState<TrackingJob[]>([]);
 
   useEffect(() => {
+    // Initial load
+    setJobs(getJobs());
+
+    // Poll for updates
     const interval = setInterval(() => {
       setJobs(getJobs());
     }, 1000);
-    setJobs(getJobs());
+
     return () => clearInterval(interval);
   }, []);
 
@@ -46,11 +50,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
             {activeJobs.map(job => (
               <Card key={job.id} className="relative overflow-hidden border-primary/20 shadow-md">
                  <div className="absolute top-0 left-0 h-1 bg-gray-100 w-full">
-                   <div className="h-full bg-primary transition-all duration-500" style={{ width: `${job.progress}%` }} />
+                   <div className="h-full bg-primary transition-all duration-500" style={{ width: `${job.progress || 0}%` }} />
                  </div>
                  <CardHeader className="pb-2">
                    <div className="flex justify-between items-start">
-                     <Badge variant="default">Processing {job.progress}%</Badge>
+                     <Badge variant="default">Processing {job.progress || 0}%</Badge>
                      <span className="text-xs text-gray-400 font-mono">#{job.id.slice(-6)}</span>
                    </div>
                    <CardTitle className="text-lg truncate mt-2" title={job.targetUrl}>
@@ -59,7 +63,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
                  </CardHeader>
                  <CardContent>
                    <p className="text-sm text-gray-500 mb-4">
-                     Checking {job.queries.length} keywords...
+                     Checking {job.queries?.length || 0} keywords...
                    </p>
                    <Button 
                      variant="outline" 
@@ -110,9 +114,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
                        <span className="text-xs text-gray-400">{new Date(job.createdAt).toLocaleDateString()}</span>
                     </div>
                     <div className="flex items-center gap-4 text-sm text-gray-500">
-                      <span>{job.queries.length} Keywords</span>
+                      <span>{job.queries?.length || 0} Keywords</span>
                       <span className="w-1 h-1 bg-gray-300 rounded-full" />
                       <span>{job.location}</span>
+                      {job.status === 'failed' && (
+                        <>
+                          <span className="w-1 h-1 bg-gray-300 rounded-full" />
+                          <span className="text-red-500">Failed</span>
+                        </>
+                      )}
                     </div>
                   </div>
 

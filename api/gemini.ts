@@ -1,16 +1,25 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI } from '@google/genai';
 
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ) {
+  // CORS
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { prompt } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
     return res.status(500).json({ error: 'GEMINI_API_KEY is not configured' });
@@ -21,20 +30,30 @@ export default async function handler(
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: "You are an expert SEO strategist using data to provide actionable insights.",
-        temperature: 0.7,
-      }
+    const model = "gemini-1.5-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      })
     });
 
-    return res.status(200).json({ text: response.text });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Gemini API Error:", errorText);
+      return res.status(response.status).json({ error: `Gemini API error: ${response.statusText}`, details: errorText });
+    }
+
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "No content generated";
+
+    return res.status(200).json({ text });
 
   } catch (error) {
-    console.error('Gemini API Error:', error);
-    return res.status(500).json({ error: 'Failed to generate content' });
+    console.error('Gemini Handler Error:', error);
+    return res.status(500).json({ error: 'Failed to process Gemini request', details: (error as Error).message });
   }
 }

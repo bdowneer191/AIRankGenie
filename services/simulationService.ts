@@ -1,15 +1,22 @@
-import { TrackingJob, TrackingResult } from "../types";
+import { TrackingJob } from "../types";
 
-// Replace the entire simulation logic with this:
+let localJobsStore: TrackingJob[] = [];
 
-export const createJob = async (
+// Helper to update job status
+const updateJob = (id: string, updates: Partial<TrackingJob>) => {
+  const idx = localJobsStore.findIndex(j => j.id === id);
+  if (idx !== -1) {
+    localJobsStore[idx] = { ...localJobsStore[idx], ...updates };
+  }
+};
+
+export const createJob = (
   targetUrl: string, 
   queries: string[], 
   location: string, 
   device: 'desktop' | 'mobile'
-): Promise<TrackingJob> => {
+): TrackingJob => { // Synchronous return
 
-  // Create a temporary ID for the UI
   const jobId = `job_${Date.now()}`;
   const createdAt = new Date().toISOString();
 
@@ -19,26 +26,24 @@ export const createJob = async (
     queries,
     location,
     device,
-    status: 'processing', // Immediately processing
+    status: 'processing',
     progress: 0,
     createdAt,
     results: []
   };
 
-  // We trigger the API call asynchronously so the UI doesn't freeze
-  // In a real app, use React Query or a dedicated hook for this
+  localJobsStore.push(newJob);
+
+  // Trigger async processing without awaiting
+  // This avoids hanging the UI while waiting for the Vercel function
   processJob(newJob);
   
   return newJob;
 };
 
-// Store jobs in memory for this session (UI State)
-let localJobsStore: TrackingJob[] = [];
-
 const processJob = async (job: TrackingJob) => {
-  localJobsStore.push(job);
-  
   try {
+    // Relative path works because of Vite proxy or Vercel routing
     const response = await fetch('/api/track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -49,32 +54,25 @@ const processJob = async (job: TrackingJob) => {
       })
     });
 
-    if (!response.ok) throw new Error('API request failed');
+    if (!response.ok) {
+       throw new Error(`API error: ${response.status} ${response.statusText}`);
+    }
 
     const data = await response.json();
 
-    // Update job in store
-    const jobIndex = localJobsStore.findIndex(j => j.id === job.id);
-    if (jobIndex !== -1) {
-      localJobsStore[jobIndex] = {
-        ...localJobsStore[jobIndex],
-        status: 'completed',
-        progress: 100,
-        results: data.results,
-        completedAt: new Date().toISOString()
-      };
-    }
+    updateJob(job.id, {
+      status: 'completed',
+      progress: 100,
+      results: data.results,
+      completedAt: new Date().toISOString()
+    });
 
   } catch (error) {
     console.error("Job Failed:", error);
-    const jobIndex = localJobsStore.findIndex(j => j.id === job.id);
-    if (jobIndex !== -1) {
-      localJobsStore[jobIndex] = { ...localJobsStore[jobIndex], status: 'failed', progress: 0 };
-    }
+    updateJob(job.id, { status: 'failed', progress: 0 });
   }
 };
 
-// Simple polling getter for the UI
 export const getJobs = (): TrackingJob[] => {
   return [...localJobsStore].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 };

@@ -178,15 +178,15 @@ const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onBack }) => {
             {job.status === 'completed' && <CheckCircle2 className="text-emerald-500 w-6 h-6" />}
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            Started {new Date(job.createdAt).toLocaleString()} • {job.queries.length} Keywords • {job.location}
+            Started {new Date(job.createdAt).toLocaleString()} • {(job.queries || []).length} Keywords • {job.location}
           </p>
         </div>
         <div className="flex gap-3">
            <div className="text-right">
               <div className="text-sm font-medium text-gray-900">Visibility Score</div>
               <div className="text-2xl font-bold text-primary">
-                {job.results.length > 0 
-                  ? Math.round((job.results.filter(r => r.rank && r.rank <= 10).length / job.results.length) * 100) 
+                {(job.results || []).length > 0
+                  ? Math.round(((job.results || []).filter(r => r.rank && r.rank <= 10).length / (job.results || []).length) * 100)
                   : 0}%
               </div>
            </div>
@@ -195,7 +195,7 @@ const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onBack }) => {
 
       {/* Results Grid */}
       <div className="grid gap-4">
-        {job.results.map((result, idx) => (
+        {(job.results || []).map((result, idx) => (
           <Card key={idx} className="overflow-hidden border-l-4 border-l-transparent hover:border-l-primary transition-all">
             <CardContent className="p-0">
               <div className="p-6 flex flex-col md:flex-row gap-6">
@@ -224,7 +224,7 @@ const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onBack }) => {
                       <h3 className="text-lg font-semibold text-gray-900">{result.query}</h3>
                       {/* SERP Features Badges */}
                       <div className="flex flex-wrap gap-2 mt-1">
-                        {result.serpFeatures.map((feature, i) => {
+                        {(result.serpFeatures || []).map((feature, i) => {
                           const config = getFeatureConfig(feature);
                           const Icon = config.icon;
                           return (
@@ -289,7 +289,7 @@ const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onBack }) => {
                 <div className="w-full md:w-64 bg-gray-50 rounded-lg p-3 text-sm border border-gray-100 hidden lg:block">
                   <h4 className="font-semibold text-gray-700 mb-2 text-xs uppercase tracking-wide">Top Competitors</h4>
                   <ul className="space-y-2">
-                    {result.competitors.slice(0, 3).map((comp, i) => (
+                    {(result.competitors || []).slice(0, 3).map((comp, i) => (
                       <li key={i} className="flex items-center gap-2 truncate">
                         <span className="text-xs font-bold text-gray-400 w-4">#{comp.rank}</span>
                         <a href={comp.url} target="_blank" rel="noreferrer" className="truncate text-gray-600 hover:text-primary hover:underline flex-1 block">

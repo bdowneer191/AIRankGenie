@@ -4,13 +4,23 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ) {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  // Handle OPTIONS preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { query, location = 'United States', device = 'desktop' } = req.body;
 
-  // Check multiple common naming conventions for the API key, including the user's specific 'serp_api'
   const apiKey = process.env.SERP_API_KEY ||
                  process.env.SERPAPI_API_KEY ||
                  process.env.SERPAPI_KEY ||
@@ -18,10 +28,10 @@ export default async function handler(
                  process.env.SERP_API;
 
   if (!apiKey) {
-    console.error('Missing SERP_API_KEY. Available env vars:', Object.keys(process.env).filter(k => k.toLowerCase().includes('serp') || k.includes('API')));
+    console.error('Missing SERP_API_KEY');
     return res.status(500).json({
       error: 'SERP_API_KEY is not configured',
-      message: 'Please set SERP_API_KEY, SERPAPI_API_KEY, SERPAPI_KEY, or serp_api in your Vercel Project Settings.'
+      message: 'Please set SERP_API_KEY in your Vercel Project Settings.'
     });
   }
 
@@ -44,7 +54,6 @@ export default async function handler(
     const response = await fetch(`https://serpapi.com/search?${params.toString()}`);
 
     if (!response.ok) {
-      // Try to parse error details from SerpApi
       const errorBody = await response.text();
       console.error(`SerpApi Failed: ${response.status} ${response.statusText} - ${errorBody}`);
       return res.status(response.status).json({
