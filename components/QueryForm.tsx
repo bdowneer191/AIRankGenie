@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, Input, Button } from './ui/Components';
 import { Search, Plus, X, Globe, Bot, Sparkles } from 'lucide-react';
-import { createJob } from '../services/simulationService';
+import { createJob } from '../services/trackingService'; // <--- Updated Import
 import { TrackingJob, SearchMode } from '../types';
 
 interface QueryFormProps {
@@ -49,13 +49,14 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
   return (
     <Card className="max-w-2xl mx-auto shadow-lg border-0 ring-1 ring-gray-200">
       <CardHeader className="border-b border-gray-100 bg-gray-50/50 pb-8">
-        <CardTitle className="text-2xl text-primary">New Tracking Job</CardTitle>
-        <p className="text-gray-500 mt-2">Track organic ranks and AI visibility.</p>
+        <CardTitle className="text-2xl text-primary">Start Real Tracking Job</CardTitle>
+        <p className="text-gray-500 mt-2">Monitor your search engine rankings across Google and AI platforms.</p>
       </CardHeader>
       <CardContent className="space-y-8 pt-8">
         
+        {/* Target URL */}
         <div className="space-y-3">
-          <label className="text-sm font-semibold text-gray-900">Target URL</label>
+          <label className="text-sm font-semibold text-gray-900">Target Website URL</label>
           <div className="relative">
             <Globe className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
             <Input 
@@ -67,32 +68,39 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
           </div>
         </div>
 
+        {/* Tracking Mode Selection */}
         <div className="space-y-3">
-          <label className="text-sm font-semibold text-gray-900">Search Mode</label>
+          <label className="text-sm font-semibold text-gray-900">Tracking Mode</label>
           <div className="grid grid-cols-3 gap-2 p-1 bg-gray-100 rounded-lg">
             <button
               onClick={() => setSearchMode('google')}
-              className={`flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-md transition-all ${searchMode === 'google' ? 'bg-white text-primary shadow-sm' : 'text-gray-500'}`}
+              className={`flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-md transition-all ${searchMode === 'google' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
             >
               <Search className="h-4 w-4" /> Standard
             </button>
             <button
               onClick={() => setSearchMode('google_ai_mode')}
-              className={`flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-md transition-all ${searchMode === 'google_ai_mode' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500'}`}
+              className={`flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-md transition-all ${searchMode === 'google_ai_mode' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-purple-600'}`}
             >
               <Sparkles className="h-4 w-4" /> AI Mode
             </button>
             <button
               onClick={() => setSearchMode('google_ask_ai')}
-              className={`flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-md transition-all ${searchMode === 'google_ask_ai' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}
+              className={`flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-md transition-all ${searchMode === 'google_ask_ai' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-indigo-600'}`}
             >
               <Bot className="h-4 w-4" /> Ask AI
             </button>
           </div>
+          <p className="text-xs text-gray-500">
+            {searchMode === 'google' && "Tracks standard organic rankings & detects AI Overviews."}
+            {searchMode === 'google_ai_mode' && "Tracks citations inside Google's dedicated AI Mode results."}
+            {searchMode === 'google_ask_ai' && "Monitors responses from the 'Ask AI' feature."}
+          </p>
         </div>
 
+        {/* Keywords Input */}
         <div className="space-y-3">
-          <label className="text-sm font-semibold text-gray-900">Keywords</label>
+          <label className="text-sm font-semibold text-gray-900">Keywords to Track</label>
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
@@ -100,17 +108,23 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
                 value={currentQuery}
                 onChange={(e) => setCurrentQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddQuery()}
-                placeholder="Enter keyword..."
+                placeholder="Enter a keyword and press Enter"
                 className="pl-10"
               />
             </div>
-            <Button onClick={() => handleAddQuery()} variant="secondary" size="md"><Plus className="h-4 w-4" /></Button>
+            <Button onClick={() => handleAddQuery()} variant="secondary" size="md">
+              <Plus className="h-4 w-4" />
+            </Button>
           </div>
-          <div className="flex flex-wrap gap-2 min-h-[40px]">
+          
+          <div className="flex flex-wrap gap-2 min-h-[40px] p-4 bg-gray-50 rounded-lg border border-gray-100">
+            {queries.length === 0 && <span className="text-sm text-gray-400 italic">No keywords added yet...</span>}
             {queries.map((q, i) => (
-              <span key={i} className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-gray-200 text-sm font-medium text-gray-700">
+              <span key={i} className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-gray-200 text-sm font-medium text-gray-700 shadow-sm">
                 {q}
-                <button onClick={() => handleRemoveQuery(i)}><X className="h-3 w-3 text-gray-400 hover:text-red-500" /></button>
+                <button onClick={() => handleRemoveQuery(i)} className="text-gray-400 hover:text-red-500">
+                  <X className="h-3 w-3" />
+                </button>
               </span>
             ))}
           </div>
@@ -119,10 +133,10 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
         <div className="pt-4 border-t border-gray-100">
           <Button 
             onClick={handleSubmit} 
-            className="w-full h-12 text-base shadow-lg" 
+            className="w-full h-12 text-base shadow-lg shadow-primary/20" 
             disabled={!targetUrl || queries.length === 0 || isLoading}
           >
-            {isLoading ? "Starting..." : "Start Tracking"}
+            {isLoading ? "Starting Real Tracking..." : `Start Tracking ${queries.length > 0 ? `(${queries.length} keywords)` : ''}`}
           </Button>
         </div>
 
