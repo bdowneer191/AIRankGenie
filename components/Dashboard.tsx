@@ -2,7 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { TrackingJob } from '../types';
 import { getJobs, deleteJob } from '../services/simulationService';
 import { Card, CardContent, CardHeader, CardTitle, Badge, Button } from './ui/Components';
-import { Clock, ArrowRight, BarChart3, Loader2, AlertCircle, Trash2 } from 'lucide-react';
+import {
+  Clock, ArrowRight, BarChart3, Loader2, AlertCircle, Trash2,
+  TrendingUp, Activity, Search, Sparkles, Bot
+} from 'lucide-react';
 
 interface DashboardProps {
   onViewJob: (job: TrackingJob) => void;
@@ -11,41 +14,98 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
   const [jobs, setJobs] = useState<TrackingJob[]>([]);
+  const [stats, setStats] = useState({ total: 0, avgRank: 0, aiVisibility: 0 });
 
   useEffect(() => {
-    // Initial load
-    setJobs(getJobs());
+    const updateData = () => {
+      const allJobs = getJobs();
+      setJobs(allJobs);
 
-    // Poll for updates
-    const interval = setInterval(() => {
-      setJobs(getJobs());
-    }, 1000);
+      // Calculate Stats
+      const completed = allJobs.filter(j => j.status === 'completed');
+      const totalResults = completed.flatMap(j => j.results || []);
+      const rankedResults = totalResults.filter(r => r.rank !== null);
 
+      const avgRank = rankedResults.length
+        ? Math.round(rankedResults.reduce((acc, r) => acc + (r.rank || 0), 0) / rankedResults.length)
+        : 0;
+
+      const aiPresent = totalResults.filter(r => r.aiOverview?.present).length;
+      const visibility = totalResults.length ? Math.round((aiPresent / totalResults.length) * 100) : 0;
+
+      setStats({
+        total: completed.length,
+        avgRank,
+        aiVisibility: visibility
+      });
+    };
+
+    updateData();
+    const interval = setInterval(updateData, 2000);
     return () => clearInterval(interval);
   }, []);
 
   const handleDeleteJob = (jobId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm('Are you sure you want to delete this report?')) {
+    if (window.confirm('Delete this report?')) {
       deleteJob(jobId);
       setJobs(getJobs());
     }
   };
 
-  const safeJobs = jobs || [];
-  const activeJobs = safeJobs.filter(j => j.status === 'queued' || j.status === 'processing');
-  const completedJobs = safeJobs.filter(j => j.status === 'completed' || j.status === 'failed');
+  const activeJobs = jobs.filter(j => j.status === 'queued' || j.status === 'processing');
+  const historyJobs = jobs.filter(j => j.status === 'completed' || j.status === 'failed');
 
   return (
-    <div className="space-y-8">
-      <div className="flex justify-between items-end">
+    <div className="space-y-8 animate-in fade-in duration-700">
+      {/* Header & Actions */}
+      <div className="flex flex-col md:flex-row justify-between items-end gap-4">
         <div>
-          <h2 className="text-3xl font-bold text-primary tracking-tight">Dashboard</h2>
-          <p className="text-gray-500 mt-1">Overview of your rank tracking performance.</p>
+          <h2 className="text-3xl font-bold text-primary tracking-tight">RankTracker Dashboard</h2>
+          <p className="text-gray-500 mt-1">Real-time SERP & AI visibility monitoring.</p>
         </div>
-        <Button onClick={onNewJob} className="shadow-lg shadow-primary/20">
-          + New Job
+        <Button onClick={onNewJob} className="shadow-lg shadow-blue-500/20 transition-transform hover:scale-105">
+          + New Tracking Job
         </Button>
+      </div>
+
+      {/* Visual Stats Row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="bg-gradient-to-br from-blue-50 to-white border-blue-100">
+          <CardContent className="p-6 flex items-center gap-4">
+            <div className="p-3 bg-blue-100 rounded-xl text-blue-600">
+              <Activity className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-blue-600">Total Reports</p>
+              <h3 className="text-2xl font-bold text-gray-900">{stats.total}</h3>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-purple-50 to-white border-purple-100">
+          <CardContent className="p-6 flex items-center gap-4">
+            <div className="p-3 bg-purple-100 rounded-xl text-purple-600">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-purple-600">AI Visibility Score</p>
+              <h3 className="text-2xl font-bold text-gray-900">{stats.aiVisibility}%</h3>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-emerald-50 to-white border-emerald-100">
+          <CardContent className="p-6 flex items-center gap-4">
+            <div className="p-3 bg-emerald-100 rounded-xl text-emerald-600">
+              <TrendingUp className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-emerald-600">Avg. Position</p>
+              <h3 className="text-2xl font-bold text-gray-900">{stats.avgRank || '-'}</h3>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Active Jobs Section */}
@@ -58,27 +118,25 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
             {activeJobs.map(job => (
               <Card key={job.id} className="relative overflow-hidden border-primary/20 shadow-md">
                  <div className="absolute top-0 left-0 h-1 bg-gray-100 w-full">
-                   <div className="h-full bg-primary transition-all duration-500" style={{ width: `${job.progress || 0}%` }} />
+                   <div className="h-full bg-primary transition-all duration-500" style={{ width: `${job.progress || 5}%` }} />
                  </div>
                  <CardHeader className="pb-2">
                    <div className="flex justify-between items-start">
-                     <Badge variant="default">Processing {job.progress || 0}%</Badge>
-                     <span className="text-xs text-gray-400 font-mono">#{job.id.slice(-6)}</span>
+                     <Badge variant="default" className="animate-pulse">Processing {job.progress}%</Badge>
+                     <span className="text-xs text-gray-400 font-mono">#{job.id.slice(-4)}</span>
                    </div>
                    <CardTitle className="text-lg truncate mt-2" title={job.targetUrl}>
                      {job.targetUrl}
                    </CardTitle>
                  </CardHeader>
                  <CardContent>
-                   <p className="text-sm text-gray-500 mb-4">
-                     Checking {job.queries?.length || 0} keywords...
-                   </p>
-                   <Button 
-                     variant="outline" 
-                     size="sm" 
-                     className="w-full" 
-                     onClick={() => onViewJob(job)}
-                   >
+                   <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
+                      {job.searchMode === 'google' && <Search className="w-3 h-3" />}
+                      {job.searchMode === 'google_ai_mode' && <Sparkles className="w-3 h-3" />}
+                      {job.searchMode === 'google_ask_ai' && <Bot className="w-3 h-3" />}
+                      {job.queries.length} keywords
+                   </div>
+                   <Button variant="outline" size="sm" className="w-full" onClick={() => onViewJob(job)}>
                      View Live Status
                    </Button>
                  </CardContent>
@@ -88,60 +146,80 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
         </div>
       )}
 
-      {/* Recent History Section */}
+      {/* Recent History List */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
           <Clock className="w-4 h-4 text-gray-500" /> Recent Reports
         </h3>
         
-        {completedJobs.length === 0 && activeJobs.length === 0 && (
-          <div className="text-center py-20 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
-            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <BarChart3 className="w-8 h-8 text-gray-400" />
+        {historyJobs.length === 0 && activeJobs.length === 0 && (
+          <div className="text-center py-16 bg-white rounded-xl border-2 border-dashed border-gray-200">
+            <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
+              <BarChart3 className="w-8 h-8 text-gray-300" />
             </div>
             <h3 className="text-lg font-medium text-gray-900">No reports yet</h3>
             <p className="text-gray-500 max-w-sm mx-auto mt-2 mb-6">
-              Start tracking a website to see real-time ranking data and AI insights.
+              Start tracking a website to see real-time ranking data.
             </p>
             <Button onClick={onNewJob}>Create your first report</Button>
           </div>
         )}
 
-        <div className="grid gap-4">
-          {completedJobs.map(job => (
-            <Card key={job.id} className="hover:shadow-md transition-shadow cursor-pointer group" onClick={() => onViewJob(job)}>
+        <div className="grid gap-3">
+          {historyJobs.map((job, i) => (
+            <Card
+              key={job.id}
+              className="hover:shadow-lg hover:border-primary/30 transition-all cursor-pointer group animate-in slide-in-from-bottom-2 duration-500"
+              style={{ animationDelay: `${i * 50}ms` }}
+              onClick={() => onViewJob(job)}
+            >
               <CardContent className="p-0">
-                <div className="flex items-center p-4 sm:p-6 gap-4">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 ${job.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
-                    {job.status === 'completed' ? <BarChart3 className="w-6 h-6" /> : <AlertCircle className="w-6 h-6" />}
+                <div className="flex items-center p-4 sm:p-5 gap-4">
+                  {/* Status Icon */}
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                    job.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'
+                  }`}>
+                    {job.status === 'completed' ? <BarChart3 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
                   </div>
                   
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
+                  {/* Job Info */}
+                  <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                    <div>
                        <h4 className="font-semibold text-gray-900 truncate">{job.targetUrl}</h4>
-                       <span className="text-xs text-gray-400">{new Date(job.createdAt).toLocaleDateString()}</span>
+                       <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                         {job.searchMode === 'google_ai_mode' ? (
+                           <span className="flex items-center gap-1 text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded"><Sparkles className="w-3 h-3"/> AI Mode</span>
+                         ) : job.searchMode === 'google_ask_ai' ? (
+                           <span className="flex items-center gap-1 text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded"><Bot className="w-3 h-3"/> Ask AI</span>
+                         ) : (
+                           <span className="flex items-center gap-1 text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded"><Search className="w-3 h-3"/> Standard</span>
+                         )}
+                         <span>• {new Date(job.createdAt).toLocaleDateString()}</span>
+                       </div>
                     </div>
-                    <div className="flex items-center gap-4 text-sm text-gray-500">
-                      <span>{job.queries?.length || 0} Keywords</span>
-                      <span className="w-1 h-1 bg-gray-300 rounded-full" />
-                      <span>{job.location}</span>
-                      {job.status === 'failed' && (
-                        <>
-                          <span className="w-1 h-1 bg-gray-300 rounded-full" />
-                          <span className="text-red-500">Failed</span>
-                        </>
-                      )}
+
+                    <div className="hidden md:block">
+                      <div className="text-xs text-gray-400 uppercase tracking-wider font-medium mb-1">Keywords</div>
+                      <div className="text-sm font-medium text-gray-700">{job.queries.length} tracked</div>
+                    </div>
+
+                    <div className="hidden md:block">
+                      <div className="text-xs text-gray-400 uppercase tracking-wider font-medium mb-1">Location</div>
+                      <div className="text-sm font-medium text-gray-700">{job.location}</div>
                     </div>
                   </div>
 
-                  <ArrowRight className="w-5 h-5 text-gray-300 group-hover:text-primary transition-colors" />
-                  <button
-                    onClick={(e) => handleDeleteJob(job.id, e)}
-                    className="p-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
-                    title="Delete report"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {/* Actions */}
+                  <div className="flex items-center gap-2">
+                    <ArrowRight className="w-5 h-5 text-gray-300 group-hover:text-primary transition-colors" />
+                    <button
+                      onClick={(e) => handleDeleteJob(job.id, e)}
+                      className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"
+                      title="Delete report"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
