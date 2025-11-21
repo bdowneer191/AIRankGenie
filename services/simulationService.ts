@@ -43,6 +43,8 @@ export const createJob = (
   const jobId = `job_${Date.now()}`;
   const createdAt = new Date().toISOString();
 
+  console.log(`Creating job ${jobId} for ${targetUrl} with ${queries.length} queries.`);
+
   const newJob: TrackingJob = {
     id: jobId,
     targetUrl,
@@ -75,9 +77,11 @@ const simulateProgress = (jobId: string, totalQueries: number): NodeJS.Timeout =
 };
 
 const processJob = async (job: TrackingJob) => {
+  console.log(`Starting processing for job ${job.id}...`);
   const progressInterval = simulateProgress(job.id, job.queries.length);
 
   try {
+    console.log('Sending request to /api/track...');
     const response = await fetch('/api/track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -89,14 +93,18 @@ const processJob = async (job: TrackingJob) => {
       })
     });
 
+    console.log(`Response status for job ${job.id}: ${response.status}`);
+
     clearInterval(progressInterval);
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      console.error(`API request failed for job ${job.id}:`, errorData);
       throw new Error(errorData.error || `API error: ${response.status}`);
     }
 
     const data = await response.json();
+    console.log(`Job ${job.id} completed successfully with ${data.results?.length || 0} results.`);
 
     updateJob(job.id, {
       status: 'completed',

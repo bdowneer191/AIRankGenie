@@ -1,10 +1,15 @@
 import { TrackingResult } from "../types";
 
 export const analyzeResultWithGemini = async (result: TrackingResult): Promise<string> => {
+  console.log(`analyzeResultWithGemini called for query: "${result.query}"`);
+
   // First check if analysis already exists from backend
   if (result.aiOverview?.analysis && result.aiOverview.analysis !== "Analysis unavailable.") {
+    console.log('Returning existing analysis from backend.');
     return result.aiOverview.analysis;
   }
+
+  console.log('Existing analysis unavailable. Initiating fallback Gemini API call...');
 
   // If not, make a direct call to the Gemini API
   try {
@@ -26,8 +31,12 @@ export const analyzeResultWithGemini = async (result: TrackingResult): Promise<s
       body: JSON.stringify({ prompt })
     });
 
+    console.log(`Gemini Fallback API status: ${response.status}`);
+
     if (!response.ok) {
-      throw new Error('Gemini API call failed');
+      const errText = await response.text();
+      console.error('Gemini API call failed:', errText);
+      throw new Error(`Gemini API call failed: ${response.status}`);
     }
 
     const data = await response.json();

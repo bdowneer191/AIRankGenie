@@ -61,6 +61,10 @@ const normalizeUrl = (url: string): string => {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Logging entry point
+  console.log('API Track Handler started');
+  console.log('Request body:', JSON.stringify(req.body));
+
   // CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -73,20 +77,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { targetUrl, queries, location = 'United States', device = 'desktop' } = req.body;
 
   if (!targetUrl || !queries || !Array.isArray(queries) || queries.length === 0) {
+    console.error('Validation error: Missing targetUrl or queries');
     return res.status(400).json({ error: 'targetUrl and queries array are required' });
   }
 
   const apiKey = process.env.SERP_API_KEY || process.env.SERPAPI_API_KEY || process.env.SERPAPI_KEY;
   const geminiApiKey = process.env.GEMINI_API_KEY;
 
+  console.log('API Keys status:', {
+    serp: !!apiKey,
+    gemini: !!geminiApiKey
+  });
+
   if (!apiKey) {
+    console.error('SERP_API_KEY configuration missing');
     return res.status(500).json({ error: 'SERP_API_KEY not configured' });
   }
 
   const normalizedTarget = normalizeUrl(targetUrl);
+  console.log('Normalized target URL:', normalizedTarget);
+
   const results = [];
 
   for (const query of queries) {
+    console.log(`Processing query: "${query}"`);
     try {
       const params = new URLSearchParams({
         q: query,
@@ -99,10 +113,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         device: device
       });
 
+      console.log('Calling SerpAPI...');
       const serpRes = await fetch(`https://serpapi.com/search?${params.toString()}`);
+      console.log(`SerpAPI status: ${serpRes.status}`);
 
       if (!serpRes.ok) {
-        console.error(`SerpAPI failed for "${query}": ${serpRes.status}`);
+        console.error(`SerpAPI failed for "${query}": ${serpRes.status} ${serpRes.statusText}`);
         results.push({
           query,
           rank: null,
@@ -116,6 +132,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const data = await serpRes.json();
+      console.log('SerpAPI data received. Parsing...');
 
       // Find rank
       let rank: number | null = null;
@@ -130,6 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
       }
+      console.log(`Found rank: ${rank}`);
 
       // Extract AI Overview
       const aiOverview = {
@@ -152,6 +170,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let analysis = "Analysis unavailable.";
       if (geminiApiKey) {
         try {
+          console.log('Calling Gemini API...');
           const prompt = `Analyze SEO for "${query}". Target rank: ${rank || '>100'}. AI Overview: ${aiOverview.present ? 'Present' : 'None'}. Give ONE actionable tip (max 30 words) to improve ranking or capture AI Overview.`;
 
           const geminiRes = await fetch(
@@ -164,6 +183,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               })
             }
           );
+
+          console.log(`Gemini API status: ${geminiRes.status}`);
 
           if (geminiRes.ok) {
             const geminiData = await geminiRes.json();
@@ -203,5 +224,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  console.log(`Job complete. Returning ${results.length} results.`);
   return res.status(200).json({ status: 'completed', results });
 }
