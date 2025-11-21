@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { TrackingJob } from '../types';
-import { getJobs, deleteJob } from '../services/simulationService';
+import { getJobs, deleteJob } from '../services/trackingService'; // <--- Updated Import
 import { Card, CardContent, CardHeader, CardTitle, Badge, Button } from './ui/Components';
-import {
-  Clock, ArrowRight, BarChart3, Loader2, AlertCircle, Trash2,
-  TrendingUp, Activity, Search, Sparkles, Bot
+import { 
+  Clock, ArrowRight, BarChart3, Loader2, AlertCircle, Trash2, 
+  TrendingUp, Activity, Search, Sparkles, Bot 
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -21,15 +21,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
       const allJobs = getJobs();
       setJobs(allJobs);
 
-      // Calculate Stats
       const completed = allJobs.filter(j => j.status === 'completed');
       const totalResults = completed.flatMap(j => j.results || []);
       const rankedResults = totalResults.filter(r => r.rank !== null);
-
-      const avgRank = rankedResults.length
-        ? Math.round(rankedResults.reduce((acc, r) => acc + (r.rank || 0), 0) / rankedResults.length)
+      
+      const avgRank = rankedResults.length 
+        ? Math.round(rankedResults.reduce((acc, r) => acc + (r.rank || 0), 0) / rankedResults.length) 
         : 0;
-
+      
       const aiPresent = totalResults.filter(r => r.aiOverview?.present).length;
       const visibility = totalResults.length ? Math.round((aiPresent / totalResults.length) * 100) : 0;
 
@@ -41,7 +40,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
     };
 
     updateData();
-    const interval = setInterval(updateData, 2000);
+    const interval = setInterval(updateData, 2000); // Poll for updates
     return () => clearInterval(interval);
   }, []);
 
@@ -58,7 +57,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
-      {/* Header & Actions */}
       <div className="flex flex-col md:flex-row justify-between items-end gap-4">
         <div>
           <h2 className="text-3xl font-bold text-primary tracking-tight">RankTracker Dashboard</h2>
@@ -69,7 +67,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
         </Button>
       </div>
 
-      {/* Visual Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="bg-gradient-to-br from-blue-50 to-white border-blue-100">
           <CardContent className="p-6 flex items-center gap-4">
@@ -108,7 +105,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
         </Card>
       </div>
 
-      {/* Active Jobs Section */}
       {activeJobs.length > 0 && (
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
@@ -146,7 +142,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
         </div>
       )}
 
-      {/* Recent History List */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
           <Clock className="w-4 h-4 text-gray-500" /> Recent Reports
@@ -167,22 +162,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
 
         <div className="grid gap-3">
           {historyJobs.map((job, i) => (
-            <Card
-              key={job.id}
+            <Card 
+              key={job.id} 
               className="hover:shadow-lg hover:border-primary/30 transition-all cursor-pointer group animate-in slide-in-from-bottom-2 duration-500"
               style={{ animationDelay: `${i * 50}ms` }}
               onClick={() => onViewJob(job)}
             >
               <CardContent className="p-0">
                 <div className="flex items-center p-4 sm:p-5 gap-4">
-                  {/* Status Icon */}
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
                     job.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'
                   }`}>
                     {job.status === 'completed' ? <BarChart3 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
                   </div>
                   
-                  {/* Job Info */}
                   <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
                     <div>
                        <h4 className="font-semibold text-gray-900 truncate">{job.targetUrl}</h4>
@@ -209,7 +202,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
                     </div>
                   </div>
 
-                  {/* Actions */}
                   <div className="flex items-center gap-2">
                     <ArrowRight className="w-5 h-5 text-gray-300 group-hover:text-primary transition-colors" />
                     <button
