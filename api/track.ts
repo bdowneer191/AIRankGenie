@@ -1,9 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Helper: Delay function for rate limiting
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper: Map raw SerpAPI keys to user-friendly feature names
 const mapSerpFeatures = (data: any): string[] => {
   const featureMap: Record<string, string> = {
     'ai_overview': 'AI Overview',
@@ -27,7 +25,6 @@ const mapSerpFeatures = (data: any): string[] => {
   return features;
 };
 
-// Helper: Generate mock historical data
 const generateMockHistory = (currentRank: number | null): { date: string; rank: number | null }[] => {
   const history = [];
   const today = new Date();
@@ -38,11 +35,9 @@ const generateMockHistory = (currentRank: number | null): { date: string; rank: 
 
     let rank: number | null = null;
     if (currentRank !== null) {
-      // Simulate rank fluctuation within ±5 positions
       const fluctuation = Math.floor(Math.random() * 11) - 5;
       rank = Math.max(1, Math.min(100, currentRank + fluctuation));
     } else if (Math.random() > 0.7) {
-      // 30% chance of having been ranked before
       rank = Math.floor(Math.random() * 50) + 50;
     }
 
@@ -52,52 +47,47 @@ const generateMockHistory = (currentRank: number | null): { date: string; rank: 
     });
   }
 
-  // Ensure last entry matches current rank
   history[history.length - 1].rank = currentRank;
-
   return history;
 };
 
-export default async function handler(
-  req: VercelRequest,
-  res: VercelResponse
-) {
-  // Set CORS headers
+const normalizeUrl = (url: string): string => {
+  try {
+    const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
+    return parsed.hostname.replace(/^www\./, '');
+  } catch {
+    return url.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0];
+  }
+};
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Handle OPTIONS preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const { targetUrl, queries, location = 'United States', device = 'desktop' } = req.body;
+
+  if (!targetUrl || !queries || !Array.isArray(queries) || queries.length === 0) {
+    return res.status(400).json({ error: 'targetUrl and queries array are required' });
   }
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  const { targetUrl, queries, location = 'United States' } = req.body;
-
-  if (!targetUrl || !queries || !Array.isArray(queries)) {
-    return res.status(400).json({ error: 'Invalid input' });
-  }
-
-  const apiKey = process.env.SERP_API_KEY || process.env.SERPAPI_API_KEY;
+  const apiKey = process.env.SERP_API_KEY || process.env.SERPAPI_API_KEY || process.env.SERPAPI_KEY;
   const geminiApiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
-    console.error('SERP_API_KEY missing');
-    return res.status(500).json({ error: 'Server configuration error (Missing SERP_API_KEY)' });
+    return res.status(500).json({ error: 'SERP_API_KEY not configured' });
   }
 
+  const normalizedTarget = normalizeUrl(targetUrl);
   const results = [];
 
-  try {
-    for (const query of queries) {
-      console.log(`Processing query: ${query}`);
-
-      // 1. Call SerpApi
+  for (const query of queries) {
+    try {
       const params = new URLSearchParams({
         q: query,
         api_key: apiKey,
@@ -106,89 +96,81 @@ export default async function handler(
         num: '100',
         hl: 'en',
         gl: 'us',
+        device: device
       });
 
       const serpRes = await fetch(`https://serpapi.com/search?${params.toString()}`);
 
       if (!serpRes.ok) {
-        console.error(`SerpAPI failed for query "${query}": ${serpRes.status} ${serpRes.statusText}`);
-        // Push a failed result or continue
+        console.error(`SerpAPI failed for "${query}": ${serpRes.status}`);
         results.push({
-            query,
-            rank: null,
-            url: targetUrl,
-            history: [],
-            aiOverview: { present: false, content: "Search failed" },
-            serpFeatures: [],
-            competitors: []
+          query,
+          rank: null,
+          url: targetUrl,
+          history: generateMockHistory(null),
+          aiOverview: { present: false, content: undefined },
+          serpFeatures: [],
+          competitors: []
         });
         continue;
       }
 
       const data = await serpRes.json();
 
-      // 2. Extract Organic Rank
-      let rank = null;
+      // Find rank
+      let rank: number | null = null;
       const organicResults = data.organic_results || [];
-      const foundItem = organicResults.find((item: any) => item.link && item.link.includes(targetUrl));
-      if (foundItem) {
-        rank = foundItem.position;
+
+      for (const item of organicResults) {
+        if (item.link) {
+          const itemDomain = normalizeUrl(item.link);
+          if (itemDomain.includes(normalizedTarget) || normalizedTarget.includes(itemDomain)) {
+            rank = item.position;
+            break;
+          }
+        }
       }
 
-      // 3. Extract AI Overview Data
-      // SerpApi returns 'ai_overview' object
+      // Extract AI Overview
       const aiOverview = {
         present: !!data.ai_overview,
         content: data.ai_overview?.snippet ||
                  data.ai_overview?.text_blocks?.map((b: any) => b.snippet).join(' ') ||
                  data.ai_overview?.answer ||
-                 (data.ai_overview ? "AI Overview detected but content unavailable" : undefined)
+                 (data.ai_overview ? "AI Overview detected" : undefined)
       };
 
-      // 4. Extract Competitors
-      const competitors = organicResults.slice(0, 3).map((c: any) => ({
+      // Get competitors
+      const competitors = organicResults.slice(0, 5).map((c: any) => ({
         rank: c.position,
-        title: c.title,
-        url: c.link,
-        snippet: c.snippet
+        title: c.title || 'Untitled',
+        url: c.link || '',
+        snippet: c.snippet || ''
       }));
 
-      // 5. Analyze with Gemini (REST API)
+      // Generate Gemini analysis
       let analysis = "Analysis unavailable.";
       if (geminiApiKey) {
         try {
-          const prompt = `
-            Analyze SEO performance for query: "${query}".
-            Target URL: ${targetUrl}
-            Rank: ${rank || '>100'}
-            AI Overview: ${aiOverview.present ? 'Yes' : 'No'}
+          const prompt = `Analyze SEO for "${query}". Target rank: ${rank || '>100'}. AI Overview: ${aiOverview.present ? 'Present' : 'None'}. Give ONE actionable tip (max 30 words) to improve ranking or capture AI Overview.`;
 
-            Top 3 Competitors:
-            ${competitors.map((c: any) => `- ${c.title}`).join('\n')}
-
-            Provide 1 concise strategy (max 30 words) to capture the AI Overview or improve rank.
-          `;
-
-          // Using gemini-1.5-flash as a standard/reliable model for now.
-          const model = "gemini-1.5-flash";
-          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
-
-          const geminiRes = await fetch(geminiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }]
-            })
-          });
+          const geminiRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }]
+              })
+            }
+          );
 
           if (geminiRes.ok) {
-             const geminiData = await geminiRes.json();
-             analysis = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "No analysis generated.";
-          } else {
-             console.warn("Gemini API call failed:", await geminiRes.text());
+            const geminiData = await geminiRes.json();
+            analysis = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "No analysis generated.";
           }
         } catch (err) {
-          console.error("Gemini Error:", err);
+          console.error("Gemini error:", err);
         }
       }
 
@@ -197,24 +179,29 @@ export default async function handler(
         rank,
         url: targetUrl,
         history: generateMockHistory(rank),
-        aiOverview: {
-          ...aiOverview,
-          analysis
-        },
+        aiOverview: { ...aiOverview, analysis },
         serpFeatures: mapSerpFeatures(data),
         competitors
       });
 
-      // Rate limit / prevent timeout if many queries?
-      // Vercel limits execution time. If queries > 3, we might hit 10s limit.
-      // But we proceed as requested.
-      if (queries.length > 1) await sleep(500);
+      // Rate limiting
+      if (queries.indexOf(query) < queries.length - 1) {
+        await sleep(600);
+      }
+
+    } catch (error) {
+      console.error(`Error processing "${query}":`, error);
+      results.push({
+        query,
+        rank: null,
+        url: targetUrl,
+        history: generateMockHistory(null),
+        aiOverview: { present: false },
+        serpFeatures: [],
+        competitors: []
+      });
     }
-
-    return res.status(200).json({ status: 'completed', results });
-
-  } catch (error) {
-    console.error('Tracking processing error:', error);
-    return res.status(500).json({ error: 'Failed to process tracking job' });
   }
+
+  return res.status(200).json({ status: 'completed', results });
 }
