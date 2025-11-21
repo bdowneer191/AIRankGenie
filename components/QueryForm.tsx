@@ -14,6 +14,7 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
   const [queries, setQueries] = useState<string[]>([]);
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [location, setLocation] = useState('United States');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleAddQuery = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -27,16 +28,23 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
     setQueries(queries.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!targetUrl || queries.length === 0) return;
     
-    const job = createJob(targetUrl, queries, location, device);
-    onJobCreated(job);
-    
-    // Reset form
-    setTargetUrl('');
-    setQueries([]);
-    setCurrentQuery('');
+    setIsLoading(true);
+    try {
+      const job = createJob(targetUrl, queries, location, device);
+      onJobCreated(job);
+
+      // Reset form
+      setTargetUrl('');
+      setQueries([]);
+      setCurrentQuery('');
+    } catch (e) {
+      console.error("Error creating job:", e);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -127,9 +135,9 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
           <Button 
             onClick={handleSubmit} 
             className="w-full h-12 text-base shadow-lg shadow-primary/20" 
-            disabled={!targetUrl || queries.length === 0}
+            disabled={!targetUrl || queries.length === 0 || isLoading}
           >
-            Start Tracking {queries.length > 0 && `(${queries.length} keywords)`}
+            {isLoading ? "Starting..." : `Start Tracking ${queries.length > 0 ? `(${queries.length} keywords)` : ''}`}
           </Button>
         </div>
 
