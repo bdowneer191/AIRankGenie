@@ -1,8 +1,8 @@
 import React from 'react';
 import { TrackingJob } from '../types';
-import { getJobs, clearAllJobs } from '../services/simulationService';
+import { getJobs, clearAllJobs } from '../services/trackingService'; // <--- Updated Import
 import { Card, CardContent, Button } from './ui/Components';
-import { Calendar, Trash2, ExternalLink } from 'lucide-react';
+import { Calendar, Trash2, ExternalLink, Sparkles, Bot, Search } from 'lucide-react';
 
 interface HistoryPageProps {
   onViewJob: (job: TrackingJob) => void;
@@ -16,7 +16,7 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ onViewJob }) => {
   }, []);
 
   const handleClearAll = () => {
-    if (window.confirm('Are you sure you want to delete all history? This cannot be undone.')) {
+    if (window.confirm('Delete all history?')) {
       clearAllJobs();
       setJobs([]);
     }
@@ -24,7 +24,6 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ onViewJob }) => {
 
   const completedJobs = jobs.filter(j => j.status === 'completed' || j.status === 'failed');
 
-  // Group by date
   const groupedByDate = completedJobs.reduce((acc, job) => {
     const date = new Date(job.createdAt).toLocaleDateString();
     if (!acc[date]) acc[date] = [];
@@ -33,11 +32,11 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ onViewJob }) => {
   }, {} as Record<string, TrackingJob[]>);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in">
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-3xl font-bold text-primary">History</h2>
-          <p className="text-gray-500 mt-1">View all past tracking reports</p>
+          <p className="text-gray-500 mt-1">Past tracking reports</p>
         </div>
         {completedJobs.length > 0 && (
           <Button variant="outline" onClick={handleClearAll} className="text-red-600 border-red-200 hover:bg-red-50">
@@ -47,9 +46,9 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ onViewJob }) => {
       </div>
 
       {completedJobs.length === 0 ? (
-        <div className="text-center py-20 bg-gray-50 rounded-xl border-2 border-dashed">
+        <div className="text-center py-20 bg-white rounded-xl border-2 border-dashed">
           <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500">No history yet. Start tracking to see results here.</p>
+          <p className="text-gray-500">No history yet.</p>
         </div>
       ) : (
         <div className="space-y-8">
@@ -58,7 +57,7 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ onViewJob }) => {
               <h3 className="text-sm font-semibold text-gray-500 mb-3 flex items-center gap-2">
                 <Calendar className="w-4 h-4" /> {date}
               </h3>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {dateJobs.map(job => (
                   <Card
                     key={job.id}
@@ -66,9 +65,14 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ onViewJob }) => {
                     onClick={() => onViewJob(job)}
                   >
                     <CardContent className="p-4 flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-gray-900">{job.targetUrl}</p>
-                        <p className="text-sm text-gray-500">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          {job.searchMode === 'google_ai_mode' && <Sparkles className="w-4 h-4 text-purple-500" />}
+                          {job.searchMode === 'google_ask_ai' && <Bot className="w-4 h-4 text-indigo-500" />}
+                          {job.searchMode === 'google' && <Search className="w-4 h-4 text-blue-500" />}
+                          <p className="font-medium text-gray-900">{job.targetUrl}</p>
+                        </div>
+                        <p className="text-sm text-gray-500 mt-1">
                           {job.queries.length} keywords • {job.location} •
                           {new Date(job.createdAt).toLocaleTimeString()}
                         </p>
