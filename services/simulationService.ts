@@ -1,12 +1,36 @@
-import { TrackingJob } from "../types";
+import { TrackingJob, TrackingResult } from "../types";
 
 let localJobsStore: TrackingJob[] = [];
 
-// Helper to update job status
+// Load from localStorage on init
+const loadFromStorage = () => {
+  try {
+    const stored = localStorage.getItem('rankTrackerJobs');
+    if (stored) {
+      localJobsStore = JSON.parse(stored);
+    }
+  } catch (e) {
+    console.error('Failed to load jobs from storage:', e);
+  }
+};
+
+// Save to localStorage
+const saveToStorage = () => {
+  try {
+    localStorage.setItem('rankTrackerJobs', JSON.stringify(localJobsStore));
+  } catch (e) {
+    console.error('Failed to save jobs to storage:', e);
+  }
+};
+
+// Initialize on module load
+loadFromStorage();
+
 const updateJob = (id: string, updates: Partial<TrackingJob>) => {
   const idx = localJobsStore.findIndex(j => j.id === id);
   if (idx !== -1) {
     localJobsStore[idx] = { ...localJobsStore[idx], ...updates };
+    saveToStorage();
   }
 };
 
@@ -15,8 +39,7 @@ export const createJob = (
   queries: string[], 
   location: string, 
   device: 'desktop' | 'mobile'
-): TrackingJob => { // Synchronous return
-
+): TrackingJob => {
   const jobId = `job_${Date.now()}`;
   const createdAt = new Date().toISOString();
 
@@ -33,29 +56,44 @@ export const createJob = (
   };
 
   localJobsStore.push(newJob);
+  saveToStorage();
 
-  // Trigger async processing without awaiting
-  // This avoids hanging the UI while waiting for the Vercel function
+  // Start async processing
   processJob(newJob);
   
   return newJob;
 };
 
+const simulateProgress = (jobId: string, totalQueries: number): NodeJS.Timeout => {
+  let currentProgress = 0;
+  const increment = 80 / (totalQueries * 2); // Reach ~80% during processing
+
+  return setInterval(() => {
+    currentProgress = Math.min(currentProgress + increment, 80);
+    updateJob(jobId, { progress: Math.round(currentProgress) });
+  }, 500);
+};
+
 const processJob = async (job: TrackingJob) => {
+  const progressInterval = simulateProgress(job.id, job.queries.length);
+
   try {
-    // Relative path works because of Vite proxy or Vercel routing
     const response = await fetch('/api/track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         targetUrl: job.targetUrl,
         queries: job.queries,
-        location: job.location
+        location: job.location,
+        device: job.device
       })
     });
 
+    clearInterval(progressInterval);
+
     if (!response.ok) {
-       throw new Error(`API error: ${response.status} ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `API error: ${response.status}`);
     }
 
     const data = await response.json();
@@ -63,16 +101,33 @@ const processJob = async (job: TrackingJob) => {
     updateJob(job.id, {
       status: 'completed',
       progress: 100,
-      results: data.results,
+      results: data.results || [],
       completedAt: new Date().toISOString()
     });
 
   } catch (error) {
+    clearInterval(progressInterval);
     console.error("Job Failed:", error);
-    updateJob(job.id, { status: 'failed', progress: 0 });
+    updateJob(job.id, {
+      status: 'failed',
+      progress: 0,
+      completedAt: new Date().toISOString()
+    });
   }
 };
 
 export const getJobs = (): TrackingJob[] => {
-  return [...localJobsStore].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return [...localJobsStore].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+};
+
+export const deleteJob = (id: string): void => {
+  localJobsStore = localJobsStore.filter(j => j.id !== id);
+  saveToStorage();
+};
+
+export const clearAllJobs = (): void => {
+  localJobsStore = [];
+  saveToStorage();
 };
