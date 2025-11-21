@@ -3,6 +3,61 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 // Helper: Delay function for rate limiting
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Helper: Map raw SerpAPI keys to user-friendly feature names
+const mapSerpFeatures = (data: any): string[] => {
+  const featureMap: Record<string, string> = {
+    'ai_overview': 'AI Overview',
+    'featured_snippet': 'Featured Snippet',
+    'people_also_ask': 'People Also Ask',
+    'knowledge_panel': 'Knowledge Panel',
+    'local_results': 'Local Pack',
+    'top_stories': 'Top Stories',
+    'video_results': 'Videos',
+    'image_results': 'Images',
+    'shopping_results': 'Shopping',
+    'sitelinks': 'Sitelinks'
+  };
+
+  const features: string[] = [];
+  for (const key of Object.keys(featureMap)) {
+    if (data[key]) {
+      features.push(featureMap[key]);
+    }
+  }
+  return features;
+};
+
+// Helper: Generate mock historical data
+const generateMockHistory = (currentRank: number | null): { date: string; rank: number | null }[] => {
+  const history = [];
+  const today = new Date();
+
+  for (let i = 13; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(date.getDate() - i);
+
+    let rank: number | null = null;
+    if (currentRank !== null) {
+      // Simulate rank fluctuation within ±5 positions
+      const fluctuation = Math.floor(Math.random() * 11) - 5;
+      rank = Math.max(1, Math.min(100, currentRank + fluctuation));
+    } else if (Math.random() > 0.7) {
+      // 30% chance of having been ranked before
+      rank = Math.floor(Math.random() * 50) + 50;
+    }
+
+    history.push({
+      date: date.toISOString().split('T')[0],
+      rank
+    });
+  }
+
+  // Ensure last entry matches current rank
+  history[history.length - 1].rank = currentRank;
+
+  return history;
+};
+
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
@@ -86,7 +141,8 @@ export default async function handler(
         present: !!data.ai_overview,
         content: data.ai_overview?.snippet ||
                  data.ai_overview?.text_blocks?.map((b: any) => b.snippet).join(' ') ||
-                 (data.ai_overview ? "AI Overview detected" : undefined)
+                 data.ai_overview?.answer ||
+                 (data.ai_overview ? "AI Overview detected but content unavailable" : undefined)
       };
 
       // 4. Extract Competitors
@@ -140,14 +196,12 @@ export default async function handler(
         query,
         rank,
         url: targetUrl,
-        history: [], // Frontend handles history generation if missing, or we can mock it here
+        history: generateMockHistory(rank),
         aiOverview: {
           ...aiOverview,
           analysis
         },
-        serpFeatures: Object.keys(data).filter(k =>
-          ['ai_overview', 'people_also_ask', 'featured_snippet', 'knowledge_panel', 'local_results'].includes(k)
-        ),
+        serpFeatures: mapSerpFeatures(data),
         competitors
       });
 
