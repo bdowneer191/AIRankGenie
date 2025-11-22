@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase';
-import { TrackingJob, TrackingResult, SearchMode } from '../types';
+import { TrackingJob, TrackingResult } from "../types";
 
-// --- Database Actions ---
+// --- Database Helpers ---
 
 export const createJobInDb = async (
   targetUrl: string,
@@ -10,6 +10,7 @@ export const createJobInDb = async (
   device: string,
   searchMode: string
 ): Promise<string | null> => {
+  // Queries are not stored in jobs table in this schema, only metadata
   const { data, error } = await supabase
     .from('jobs')
     .insert([{ target_url: targetUrl, location, device, search_mode: searchMode, status: 'processing' }])
@@ -31,8 +32,8 @@ export const saveResultsToDb = async (jobId: string, results: TrackingResult[]) 
     url: r.url,
     search_volume: r.searchVolume || 0,
     ai_present: r.aiOverview.present,
-    ai_content: r.aiOverview.content,
-    ai_sentiment: r.aiOverview.sentiment
+    ai_content: r.aiOverview.content || '',
+    ai_sentiment: r.aiOverview.sentiment || 'neutral'
   }));
 
   const { error } = await supabase.from('results').insert(dbRows);
@@ -40,39 +41,122 @@ export const saveResultsToDb = async (jobId: string, results: TrackingResult[]) 
 };
 
 export const markJobComplete = async (jobId: string) => {
-  await supabase
-    .from('jobs')
-    .update({ status: 'completed' })
-    .eq('id', jobId);
+  await supabase.from('jobs').update({ status: 'completed' }).eq('id', jobId);
 };
 
-// --- Fetching Actions (For Dashboard) ---
+export const markJobFailed = async (jobId: string) => {
+  await supabase.from('jobs').update({ status: 'failed' }).eq('id', jobId);
+};
 
-export const getJobs = async (): Promise<TrackingJob[]> => {
+export const deleteJob = async (id: string) => {
+  const { error } = await supabase.from('jobs').delete().eq('id', id);
+  if (error) console.error("Error deleting job:", error);
+};
+
+export const clearAllJobs = async () => {
+    console.warn("clearAllJobs is not implemented for safety.");
+};
+
+
+// --- The Main Logic: Orchestrator ---
+
+export const createJob = async (
+  targetUrl: string,
+  queries: string[],
+  location: string,
+  device: 'desktop' | 'mobile',
+  searchMode: 'google' | 'google_ai_mode' | 'google_ask_ai'
+): Promise<TrackingJob | null> => {
+  // 1. Create Job in DB
+  const jobId = await createJobInDb(targetUrl, queries, location, device, searchMode);
+  if (!jobId) throw new Error("Failed to initialize job in database");
+
+  // 2. Start Background Processing (Client-Side Batching)
+  // We don't await this so the UI returns immediately
+  processJobInBatches(jobId, targetUrl, queries, location, searchMode);
+
+  // Return a temporary local object for the UI to display immediately
+  return {
+    id: jobId,
+    targetUrl,
+    queries,
+    location,
+    device,
+    searchMode,
+    status: 'processing',
+    progress: 0,
+    createdAt: new Date().toISOString(),
+    results: []
+  };
+};
+
+const processJobInBatches = async (
+  jobId: string,
+  targetUrl: string,
+  queries: string[],
+  location: string,
+  searchMode: string
+) => {
+  const BATCH_SIZE = 3; // Safe limit for Vercel Free Tier (10s timeout)
+
+  try {
+    for (let i = 0; i < queries.length; i += BATCH_SIZE) {
+      const batch = queries.slice(i, i + BATCH_SIZE);
+
+      // Call our API
+      const response = await fetch('/api/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUrl, queries: batch, location, searchMode })
+      });
+
+      if (!response.ok) throw new Error(`Batch failed: ${response.statusText}`);
+
+      const data = await response.json();
+
+      // Save this batch to DB
+      if (data.results && data.results.length > 0) {
+        await saveResultsToDb(jobId, data.results);
+      }
+
+      // Small delay to be nice to the API
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    // All batches done
+    await markJobComplete(jobId);
+
+  } catch (error) {
+    console.error("Job processing error:", error);
+    await markJobFailed(jobId);
+  }
+};
+
+// --- Fetching for Dashboard ---
+
+export const getJobsFromDb = async (): Promise<TrackingJob[]> => {
   const { data: jobs, error } = await supabase
     .from('jobs')
-    .select(`
-      *,
-      results (*)
-    `)
+    .select(`*, results(*)`)
     .order('created_at', { ascending: false });
 
-  if (error || !jobs) {
+  if (error) {
     console.error("Error fetching jobs:", error);
     return [];
   }
 
-  // Transform DB shape back to your UI Type shape
+  // Transform DB shape to UI shape
   return jobs.map((j: any) => ({
     id: j.id,
     targetUrl: j.target_url,
+    // If results exist, map them to queries. If no results yet (and since queries aren't in job table), this might be empty initially.
+    queries: j.results ? j.results.map((r: any) => r.query) : [],
     location: j.location,
     device: j.device,
     searchMode: j.search_mode,
     status: j.status,
+    progress: j.status === 'completed' ? 100 : (j.results && j.results.length > 0 ? 50 : 0), // Approx progress
     createdAt: j.created_at,
-    progress: j.status === 'completed' ? 100 : 0,
-    queries: j.results ? j.results.map((r: any) => r.query) : [],
     results: j.results ? j.results.map((r: any) => ({
       query: r.query,
       rank: r.rank,
@@ -90,76 +174,5 @@ export const getJobs = async (): Promise<TrackingJob[]> => {
   }));
 };
 
-export const deleteJob = async (id: string) => {
-  const { error } = await supabase.from('jobs').delete().eq('id', id);
-  if (error) console.error("Error deleting job:", error);
-};
-
-export const clearAllJobs = async () => {
-   // Optional: Add a way to clear all data if needed, but usually not exposed in production
-   console.warn("clearAllJobs is not implemented for safety.");
-};
-
-// --- Orchestration ---
-
-export const createJob = async (
-  targetUrl: string,
-  queries: string[],
-  location: string,
-  device: 'desktop' | 'mobile',
-  searchMode: SearchMode
-): Promise<TrackingJob | null> => {
-
-  // 1. Create Job in DB
-  const jobId = await createJobInDb(targetUrl, queries, location, device, searchMode);
-  if (!jobId) return null;
-
-  // 2. Call API
-  try {
-    const response = await fetch('/api/track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        targetUrl,
-        queries,
-        location,
-        device,
-        searchMode
-      })
-    });
-
-    if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const results = data.results || [];
-
-    // 3. Save Results
-    await saveResultsToDb(jobId, results);
-
-    // 4. Mark Complete
-    await markJobComplete(jobId);
-
-    // Return the new job object (constructed locally or fetched)
-    // For speed, let's construct it locally based on inputs and results
-    return {
-        id: jobId,
-        targetUrl,
-        queries,
-        location,
-        device,
-        searchMode,
-        status: 'completed',
-        progress: 100,
-        createdAt: new Date().toISOString(),
-        results,
-    };
-
-  } catch (error) {
-    console.error("Tracking failed:", error);
-    // Mark as failed in DB
-    await supabase.from('jobs').update({ status: 'failed' }).eq('id', jobId);
-    return null;
-  }
-};
+// Alias for compatibility with components
+export const getJobs = getJobsFromDb;
