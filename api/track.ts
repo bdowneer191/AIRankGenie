@@ -1,206 +1,120 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Timeout-safe fetch with retry
-const fetchWithTimeout = async (url: string, timeout = 8000): Promise<Response> => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
+// --- Helper: Heuristic Sentiment Analysis (Fast) ---
+const analyzeSentiment = (text: string, targetUrl: string): 'positive' | 'negative' | 'neutral' => {
+  if (!text) return 'neutral';
+  const lower = text.toLowerCase();
   
+  // 1. Extract brand name from URL (e.g., "hypefresh" from "hypefresh.com")
+  let brand = '';
   try {
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    throw error;
-  }
+    const hostname = new URL(targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`).hostname;
+    brand = hostname.split('.')[0];
+  } catch (e) { brand = targetUrl; }
+
+  if (!lower.includes(brand.toLowerCase())) return 'neutral';
+
+  const positive = ['best', 'top', 'excellent', 'great', 'leading', 'trusted', 'recommended', 'quality'];
+  const negative = ['worst', 'poor', 'bad', 'outdated', 'unreliable', 'problem', 'avoid', 'complaint'];
+
+  let score = 0;
+  positive.forEach(w => { if (lower.includes(w)) score++; });
+  negative.forEach(w => { if (lower.includes(w)) score--; });
+
+  if (score > 0) return 'positive';
+  if (score < 0) return 'negative';
+  return 'neutral';
 };
 
-// Normalize URL
-const normalizeUrl = (url: string): string => {
-  try {
-    const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
-    return parsed.hostname.replace(/^www\./, '');
-  } catch (e) {
-    return url.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0];
-  }
-};
-
-// Estimate search volume (mock data - in production, use SEMrush/Ahrefs API)
-const estimateSearchVolume = (query: string): number => {
-  const wordCount = query.split(' ').length;
-  const baseVolume = 1000;
-  
-  // Simple heuristic: shorter queries = higher volume
-  if (wordCount === 1) return baseVolume * 5;
-  if (wordCount === 2) return baseVolume * 3;
-  if (wordCount === 3) return baseVolume * 2;
-  return baseVolume;
+// --- Helper: Search Volume Estimate (Mock - Replace with DataForSEO later if needed) ---
+const estimateVolume = (q: string) => {
+  const len = q.split(' ').length;
+  if (len === 1) return 5000; // "Head" term
+  if (len === 2) return 1200;
+  return 250; // "Long tail"
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const startTime = Date.now();
-  const requestId = `req_${Date.now()}`;
-  
-  console.log(`[${requestId}] Request started`);
-  
-  // CORS
+  // CORS Setup
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
+
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  
+
+  const { targetUrl, queries, location = 'United States', searchMode = 'google' } = req.body;
+  const apiKey = process.env.SERP_API_KEY;
+
+  if (!apiKey) return res.status(500).json({ error: 'Server configuration error: Missing API Key' });
+
   try {
-    const { targetUrl, queries, location = 'United States', device = 'desktop', searchMode = 'google' } = req.body;
-    
-    if (!targetUrl || !queries || !Array.isArray(queries)) {
-      return res.status(400).json({ error: 'Invalid input' });
-    }
-    
-    const serpApiKey = process.env.SERP_API_KEY || process.env.SERPAPI_API_KEY;
-    if (!serpApiKey) {
-      return res.status(500).json({ error: 'SERP_API_KEY not configured' });
-    }
-    
-    const normalizedTarget = normalizeUrl(targetUrl);
-    
-    // Process queries with timeout protection (max 2 to stay under 10s)
-    const limitedQueries = queries.slice(0, 2);
-    
-    const results = await Promise.all(
-      limitedQueries.map(async (query: string) => {
-        try {
-          // Check remaining time
-          const elapsed = Date.now() - startTime;
-          if (elapsed > 8000) {
-            throw new Error('Timeout protection triggered');
-          }
-          
-          const engine = searchMode === 'google_ai_mode' ? 'google_ai_mode' : 'google';
-          const params = new URLSearchParams({
-            q: query,
-            api_key: serpApiKey,
-            engine,
-            location,
-            num: '20',
-            hl: 'en',
-            gl: 'us',
-            device
-          });
-          
-          const serpRes = await fetchWithTimeout(`https://serpapi.com/search?${params.toString()}`, 7000);
-          
-          if (!serpRes.ok) {
-            throw new Error(`SerpAPI error: ${serpRes.status}`);
-          }
-          
-          const data = await serpRes.json();
-          
-          // Parse results
-          let rank: number | null = null;
-          let aiContent = "";
-          let isAiPresent = false;
-          const competitors: any[] = [];
-          const features: string[] = [];
-          
-          // Feature Detection
-          if (data.ai_overview) {
-            features.push("AI Overview");
-            isAiPresent = true;
-            aiContent = data.ai_overview.snippet || "";
-          }
-          if (data.ask_ai_result) {
-            features.push("Ask AI");
-            isAiPresent = true;
-            aiContent = data.ask_ai_result.snippet || "";
-          }
-          
-          // Standard search parsing
-          if (searchMode === 'google' || searchMode === 'google_ask_ai') {
-            const organic = data.organic_results || [];
-            for (const item of organic) {
-              if (item.link && normalizeUrl(item.link).includes(normalizedTarget)) {
-                rank = item.position;
-                break;
-              }
-            }
-            organic.slice(0, 5).forEach((c: any) => {
-              competitors.push({
-                rank: c.position,
-                title: c.title,
-                url: c.link,
-                snippet: c.snippet || ""
-              });
-            });
-          }
-          // AI Mode parsing
-          else if (searchMode === 'google_ai_mode') {
-            isAiPresent = true;
-            aiContent = data.text_blocks?.[0]?.snippet || data.ai_overview?.snippet || "";
-            
-            const sources = data.sources || data.references || [];
-            sources.forEach((source: any, idx: number) => {
-              competitors.push({
-                rank: idx + 1,
-                title: source.title || "",
-                url: source.link || "",
-                snippet: source.snippet || ""
-              });
-              if (source.link && normalizeUrl(source.link).includes(normalizedTarget)) {
-                rank = idx + 1;
-              }
-            });
-          }
-          
-          // Estimate search volume
-          const searchVolume = estimateSearchVolume(query);
-          
-          return {
-            query,
-            rank,
-            url: targetUrl,
-            searchVolume,
-            history: [{ date: new Date().toISOString(), rank, searchVolume }],
-            aiOverview: {
-              present: isAiPresent,
-              content: aiContent
-            },
-            serpFeatures: features,
-            competitors
-          };
-          
-        } catch (error: any) {
-          console.error(`[${requestId}] Query failed: ${query}`, error.message);
-          return {
-            query,
-            rank: null,
-            url: targetUrl,
-            searchVolume: estimateSearchVolume(query),
-            history: [],
-            aiOverview: { present: false, content: `Error: ${error.message}` },
-            serpFeatures: [],
-            competitors: []
-          };
+    // Process queries in parallel (Vercel Limit: 10s. Keep batch size small on frontend!)
+    const results = await Promise.all(queries.map(async (query: string) => {
+      const params = new URLSearchParams({
+        q: query,
+        api_key: apiKey,
+        engine: searchMode === 'google_ai_mode' ? 'google_ai_mode' : 'google',
+        location,
+        gl: 'us',
+        hl: 'en',
+        num: '20'
+      });
+
+      const serpRes = await fetch(`https://serpapi.com/search?${params.toString()}`);
+      const data = await serpRes.json();
+
+      // --- Parsing Logic ---
+      let rank: number | null = null;
+      let aiContent = "";
+      let isAiPresent = false;
+
+      // 1. Detect AI
+      if (data.ai_overview?.snippet) {
+        isAiPresent = true;
+        aiContent = data.ai_overview.snippet;
+      } else if (data.text_blocks) {
+        // AI Mode specific
+        isAiPresent = true;
+        aiContent = data.text_blocks.map((b: any) => b.snippet).join(' ');
+      }
+
+      // 2. Find Rank (Organic)
+      const organic = data.organic_results || [];
+      for (const item of organic) {
+        if (item.link && item.link.includes(targetUrl)) {
+          rank = item.position;
+          break;
         }
-      })
-    );
-    
-    const elapsed = Date.now() - startTime;
-    console.log(`[${requestId}] Completed in ${elapsed}ms`);
-    
-    return res.status(200).json({
-      status: 'completed',
-      results,
-      processingTime: elapsed
-    });
-    
+      }
+
+      // 3. AI Mode specific citations
+      if (searchMode === 'google_ai_mode' && data.sources) {
+        data.sources.forEach((source: any, idx: number) => {
+           if (source.link && source.link.includes(targetUrl)) {
+             rank = idx + 1; // "Citation Rank"
+           }
+        });
+      }
+
+      return {
+        query,
+        rank,
+        url: targetUrl,
+        searchVolume: estimateVolume(query),
+        aiOverview: {
+          present: isAiPresent,
+          content: aiContent,
+          sentiment: analyzeSentiment(aiContent, targetUrl)
+        }
+      };
+    }));
+
+    return res.status(200).json({ results });
+
   } catch (error: any) {
-    console.error(`[${requestId}] Critical error:`, error);
-    return res.status(500).json({
-      error: 'Internal server error',
-      details: error.message
-    });
+    console.error("Track API Error:", error);
+    return res.status(500).json({ error: error.message });
   }
 }
