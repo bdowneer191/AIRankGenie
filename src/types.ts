@@ -26,6 +26,7 @@ export interface TrackingResult {
     content?: string;
     analysis?: string;
     type?: string;
+    sentiment?: 'positive' | 'neutral' | 'negative';
   };
   serpFeatures: string[];
   competitors: CompetitorResult[];
