@@ -6,19 +6,21 @@ export interface TrackingJob {
   queries: string[];
   location: string;
   device: 'desktop' | 'mobile';
-  searchMode: SearchMode; // <--- Added tracking mode
+  searchMode: SearchMode;
   status: 'queued' | 'processing' | 'completed' | 'failed';
   progress: number;
   createdAt: string;
   completedAt?: string;
   results: TrackingResult[];
+  volatilityIndex?: number; // Added to match usage in trackingService.ts
 }
 
 export interface TrackingResult {
   query: string;
   rank: number | null;
   url: string;
-  history: { date: string; rank: number | null }[];
+  searchVolume?: number; // Added to match usage in trackingService.ts
+  history: { date: string; rank: number | null; searchVolume?: number }[];
   aiOverview: {
     present: boolean;
     content?: string;
