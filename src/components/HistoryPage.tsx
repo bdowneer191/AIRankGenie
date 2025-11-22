@@ -31,6 +31,11 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ onViewJob }) => {
     return acc;
   }, {} as Record<string, TrackingJob[]>);
 
+  // Sort dates descending
+  const sortedDates = Object.keys(groupedByDate).sort((a, b) =>
+    new Date(b).getTime() - new Date(a).getTime()
+  );
+
   return (
     <div className="space-y-6 animate-in fade-in">
       <div className="flex justify-between items-center">
@@ -52,13 +57,13 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ onViewJob }) => {
         </div>
       ) : (
         <div className="space-y-8">
-          {Object.entries(groupedByDate).map(([date, dateJobs]) => (
+          {sortedDates.map((date) => (
             <div key={date}>
               <h3 className="text-sm font-semibold text-gray-500 mb-3 flex items-center gap-2">
                 <Calendar className="w-4 h-4" /> {date}
               </h3>
               <div className="space-y-3">
-                {dateJobs.map(job => (
+                {groupedByDate[date].map(job => (
                   <Card
                     key={job.id}
                     className="cursor-pointer hover:shadow-md transition-shadow"
