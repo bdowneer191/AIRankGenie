@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { TrackingJob } from '../types';
-import { getJobs, deleteJob } from '../services/trackingService'; // <--- Updated Import
+import { getJobsFromDb, deleteJob } from '../services/trackingService'; // <--- Updated Import
 import { Card, CardContent, CardHeader, CardTitle, Badge, Button } from './ui/Components';
 import { 
   Clock, ArrowRight, BarChart3, Loader2, AlertCircle, Trash2, 
@@ -18,7 +18,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
 
   useEffect(() => {
     const updateData = async () => {
-      const allJobs = await getJobs();
+      const allJobs = await getJobsFromDb();
       setJobs(allJobs);
 
       const completed = allJobs.filter(j => j.status === 'completed');
@@ -48,7 +48,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
     e.stopPropagation();
     if (window.confirm('Delete this report?')) {
       await deleteJob(jobId);
-      setJobs(await getJobs());
+      setJobs(await getJobsFromDb());
     }
   };
 
