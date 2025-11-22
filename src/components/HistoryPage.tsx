@@ -12,12 +12,15 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ onViewJob }) => {
   const [jobs, setJobs] = React.useState<TrackingJob[]>([]);
 
   React.useEffect(() => {
-    setJobs(getJobs());
+    const fetchJobs = async () => {
+      setJobs(await getJobs());
+    };
+    fetchJobs();
   }, []);
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     if (window.confirm('Delete all history?')) {
-      clearAllJobs();
+      await clearAllJobs();
       setJobs([]);
     }
   };

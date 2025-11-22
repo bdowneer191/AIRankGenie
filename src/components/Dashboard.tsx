@@ -17,8 +17,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
   const [stats, setStats] = useState({ total: 0, avgRank: 0, aiVisibility: 0 });
 
   useEffect(() => {
-    const updateData = () => {
-      const allJobs = getJobs();
+    const updateData = async () => {
+      const allJobs = await getJobs();
       setJobs(allJobs);
 
       const completed = allJobs.filter(j => j.status === 'completed');
@@ -40,15 +40,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
     };
 
     updateData();
-    const interval = setInterval(updateData, 2000); // Poll for updates
+    const interval = setInterval(updateData, 5000); // Poll for updates (slower for DB)
     return () => clearInterval(interval);
   }, []);
 
-  const handleDeleteJob = (jobId: string, e: React.MouseEvent) => {
+  const handleDeleteJob = async (jobId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm('Delete this report?')) {
-      deleteJob(jobId);
-      setJobs(getJobs());
+      await deleteJob(jobId);
+      setJobs(await getJobs());
     }
   };
 

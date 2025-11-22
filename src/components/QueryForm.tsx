@@ -34,8 +34,8 @@ const QueryForm: React.FC<QueryFormProps> = ({ onJobCreated }) => {
     
     setIsLoading(true);
     try {
-      const job = createJob(targetUrl, queries, location, device, searchMode);
-      onJobCreated(job);
+      const job = await createJob(targetUrl, queries, location, device, searchMode);
+      if (job) onJobCreated(job);
       setTargetUrl('');
       setQueries([]);
       setCurrentQuery('');
