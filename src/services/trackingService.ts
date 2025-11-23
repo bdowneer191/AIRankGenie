@@ -1,6 +1,32 @@
 import { supabase } from '../lib/supabase';
 import { TrackingJob, TrackingResult } from "../types";
 
+// --- Helper: Client-Side Sentiment Analysis ---
+const analyzeSentiment = (text: string, targetUrl: string): 'positive' | 'negative' | 'neutral' => {
+  if (!text) return 'neutral';
+  const lower = text.toLowerCase();
+
+  // 1. Extract brand name from URL (e.g., "hypefresh" from "hypefresh.com")
+  let brand = '';
+  try {
+    const hostname = new URL(targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`).hostname;
+    brand = hostname.split('.')[0];
+  } catch (e) { brand = targetUrl; }
+
+  if (!lower.includes(brand.toLowerCase())) return 'neutral';
+
+  const positive = ['best', 'top', 'excellent', 'great', 'leading', 'trusted', 'recommended', 'quality'];
+  const negative = ['worst', 'poor', 'bad', 'outdated', 'unreliable', 'problem', 'avoid', 'complaint'];
+
+  let score = 0;
+  positive.forEach(w => { if (lower.includes(w)) score++; });
+  negative.forEach(w => { if (lower.includes(w)) score--; });
+
+  if (score > 0) return 'positive';
+  if (score < 0) return 'negative';
+  return 'neutral';
+};
+
 // --- Database Helpers ---
 
 export const createJobInDb = async (
@@ -10,7 +36,6 @@ export const createJobInDb = async (
   device: string,
   searchMode: string
 ): Promise<string | null> => {
-  // Queries are not stored in jobs table in this schema, only metadata
   const { data, error } = await supabase
     .from('jobs')
     .insert([{ target_url: targetUrl, location, device, search_mode: searchMode, status: 'processing' }])
@@ -57,7 +82,6 @@ export const clearAllJobs = async () => {
     console.warn("clearAllJobs is not implemented for safety.");
 };
 
-
 // --- The Main Logic: Orchestrator ---
 
 export const createJob = async (
@@ -72,7 +96,6 @@ export const createJob = async (
   if (!jobId) throw new Error("Failed to initialize job in database");
 
   // 2. Start Background Processing (Client-Side Batching)
-  // We don't await this so the UI returns immediately
   processJobInBatches(jobId, targetUrl, queries, location, searchMode);
 
   // Return a temporary local object for the UI to display immediately
@@ -97,7 +120,7 @@ const processJobInBatches = async (
   location: string,
   searchMode: string
 ) => {
-  const BATCH_SIZE = 3; // Safe limit for Vercel Free Tier (10s timeout)
+  const BATCH_SIZE = 1; // Strict limit for Vercel Free Tier (10s timeout)
 
   try {
     for (let i = 0; i < queries.length; i += BATCH_SIZE) {
@@ -114,9 +137,16 @@ const processJobInBatches = async (
 
       const data = await response.json();
 
-      // Save this batch to DB
+      // Apply client-side sentiment analysis and save to DB
       if (data.results && data.results.length > 0) {
-        await saveResultsToDb(jobId, data.results);
+        const enrichedResults = data.results.map((r: TrackingResult) => ({
+          ...r,
+          aiOverview: {
+            ...r.aiOverview,
+            sentiment: analyzeSentiment(r.aiOverview.content || '', targetUrl)
+          }
+        }));
+        await saveResultsToDb(jobId, enrichedResults);
       }
 
       // Small delay to be nice to the API
@@ -145,17 +175,15 @@ export const getJobsFromDb = async (): Promise<TrackingJob[]> => {
     return [];
   }
 
-  // Transform DB shape to UI shape
   return jobs.map((j: any) => ({
     id: j.id,
     targetUrl: j.target_url,
-    // If results exist, map them to queries. If no results yet (and since queries aren't in job table), this might be empty initially.
     queries: j.results ? j.results.map((r: any) => r.query) : [],
     location: j.location,
     device: j.device,
     searchMode: j.search_mode,
     status: j.status,
-    progress: j.status === 'completed' ? 100 : (j.results && j.results.length > 0 ? 50 : 0), // Approx progress
+    progress: j.status === 'completed' ? 100 : (j.results && j.results.length > 0 ? 50 : 0),
     createdAt: j.created_at,
     results: j.results ? j.results.map((r: any) => ({
       query: r.query,
@@ -174,5 +202,5 @@ export const getJobsFromDb = async (): Promise<TrackingJob[]> => {
   }));
 };
 
-// Alias for compatibility with components
+// Alias for compatibility
 export const getJobs = getJobsFromDb;
