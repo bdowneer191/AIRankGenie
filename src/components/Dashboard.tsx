@@ -105,7 +105,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
         </Card>
       </div>
 
-      {activeJobs.length > 0 && (
+      {activeJobs && activeJobs.length > 0 && (
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin text-primary" /> Processing
@@ -136,6 +136,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewJob, onNewJob }) => {
                      View Live Status
                    </Button>
                  </CardContent>
+                 {job.status === 'failed' && (
+                   <div className="absolute inset-0 bg-red-50/90 flex items-center justify-center text-red-600 font-bold z-10">
+                     Processing Failed
+                   </div>
+                 )}
               </Card>
             ))}
           </div>
