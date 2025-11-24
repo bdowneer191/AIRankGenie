@@ -1,213 +1,491 @@
-import { supabase } from '../lib/supabase';
-import { TrackingJob, TrackingResult } from "../types";
+// ============================================================================
+// ADVANCED TRACKING SERVICE - VERCEL HOBBY OPTIMIZED
+// ============================================================================
+// Handles: 10s timeout limits, rate limiting, async workflows, retry logic
 
-// --- Database Helpers ---
+import { supabase, supabaseHelpers } from '../lib/supabase';
+import { TrackingJob, TrackingResult, SearchMode } from '../types';
 
-export const createJobInDb = async (
-  targetUrl: string,
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+const CONFIG = {
+  // Vercel Hobby: 10s timeout limit
+  MAX_EXECUTION_TIME: 8000, // 8s buffer for safety
+  
+  // CONSERVATIVE: Start with 1 keyword at a time
+  START_BATCH_SIZE: 1,      // ONE query at a time
+  CHECK_BATCH_SIZE: 1,       // Check ONE at a time
+  
+  // Retry & polling
+  MAX_RETRIES: 3,
+  CHECK_INTERVAL: 3000,      // 3s between checks
+  MAX_POLL_TIME: 180000,     // 3min max polling time
+  
+  // Rate limiting
+  REQUESTS_PER_MINUTE: 30,   // Very conservative
+  REQUEST_DELAY: 2000,       // 2s between requests
+  
+  // Limits
+  MAX_KEYWORDS_PER_JOB: 5,   // Hard limit for hobby tier
+};
+
+// ============================================================================
+// HELPER: Rate Limiter (Simple Token Bucket)
+// ============================================================================
+
+class RateLimiter {
+  private tokens: number;
+  private lastRefill: number;
+  private readonly maxTokens: number;
+  private readonly refillRate: number;
+
+  constructor(maxTokens: number, refillRate: number) {
+    this.maxTokens = maxTokens;
+    this.tokens = maxTokens;
+    this.refillRate = refillRate;
+    this.lastRefill = Date.now();
+  }
+
+  async acquire(): Promise<void> {
+    // Refill tokens
+    const now = Date.now();
+    const elapsed = now - this.lastRefill;
+    const tokensToAdd = Math.floor(elapsed / (60000 / this.refillRate));
+    
+    if (tokensToAdd > 0) {
+      this.tokens = Math.min(this.maxTokens, this.tokens + tokensToAdd);
+      this.lastRefill = now;
+    }
+
+    // Wait if no tokens available
+    if (this.tokens <= 0) {
+      const waitTime = (60000 / this.refillRate) - (now - this.lastRefill);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      this.tokens = 1;
+    }
+
+    this.tokens--;
+  }
+}
+
+const rateLimiter = new RateLimiter(
+  CONFIG.REQUESTS_PER_MINUTE, 
+  CONFIG.REQUESTS_PER_MINUTE
+);
+
+// ============================================================================
+// HELPER: Delay
+// ============================================================================
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ============================================================================
+// HELPER: Retry with Exponential Backoff
+// ============================================================================
+
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = CONFIG.MAX_RETRIES,
+  context: string = 'operation'
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(`${context} failed (attempt ${attempt + 1}/${maxRetries}):`, error);
+      
+      if (attempt < maxRetries - 1) {
+        const backoffTime = Math.min(1000 * Math.pow(2, attempt), 5000);
+        await delay(backoffTime);
+      }
+    }
+  }
+  
+  throw lastError || new Error(`${context} failed after ${maxRetries} attempts`);
+}
+
+// ============================================================================
+// HELPER: Timeout Wrapper
+// ============================================================================
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMsg: string = 'Operation timed out'
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => 
+      setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
+    )
+  ]);
+}
+
+// ============================================================================
+// CORE: Start Async Search (Phase 1)
+// ============================================================================
+
+async function startAsyncSearches(
+  jobId: string,
   queries: string[],
   location: string,
-  device: string,
-  searchMode: string
-): Promise<string | null> => {
-  const { data, error } = await supabase
-    .from('jobs')
-    .insert([{ target_url: targetUrl, location, device, search_mode: searchMode, status: 'processing' }])
-    .select()
-    .single();
+  searchMode: SearchMode
+): Promise<Array<{ query: string; serpapi_id: string; result_id: string }>> {
+  const tasks: Array<{ query: string; serpapi_id: string; result_id: string }> = [];
+  
+  // Process in batches to avoid timeout
+  for (let i = 0; i < queries.length; i += CONFIG.START_BATCH_SIZE) {
+    const batch = queries.slice(i, i + CONFIG.START_BATCH_SIZE);
+    
+    await rateLimiter.acquire();
+    
+    try {
+      const response = await withTimeout(
+        fetch('/api/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            jobId, 
+            queries: batch, 
+            location, 
+            searchMode 
+          })
+        }),
+        CONFIG.MAX_EXECUTION_TIME,
+        'Start API timeout'
+      );
 
-  if (error) {
-    console.error('Error creating job:', error);
-    return null;
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Start API failed: ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.tasks && Array.isArray(data.tasks)) {
+        // Save to database immediately
+        const dbInserts = data.tasks.map((task: any) => ({
+          job_id: jobId,
+          query: task.query,
+          serpapi_id: task.serpapi_id,
+          processing_status: 'pending',
+          ai_present: false,
+        }));
+
+        const { data: insertedResults, error } = await supabase
+          .from('results')
+          .insert(dbInserts)
+          .select('id, query, serpapi_id');
+
+        if (error) {
+          console.error('Error saving pending tasks:', error);
+        } else {
+          tasks.push(...(insertedResults || []).map((r: any) => ({
+            query: r.query,
+            serpapi_id: r.serpapi_id,
+            result_id: r.id
+          })));
+        }
+      }
+
+      // Small delay between batches
+      if (i + CONFIG.START_BATCH_SIZE < queries.length) {
+        await delay(CONFIG.REQUEST_DELAY);
+      }
+
+    } catch (error) {
+      console.error(`Batch ${i}-${i + CONFIG.START_BATCH_SIZE} failed:`, error);
+      // Continue with remaining batches
+    }
   }
-  return data.id;
-};
 
-export const markJobComplete = async (jobId: string) => {
-  await supabase.from('jobs').update({ status: 'completed' }).eq('id', jobId);
-};
+  return tasks;
+}
 
-export const markJobFailed = async (jobId: string) => {
-  await supabase.from('jobs').update({ status: 'failed' }).eq('id', jobId);
-};
+// ============================================================================
+// CORE: Check & Update Results (Phase 2)
+// ============================================================================
 
-export const deleteJob = async (id: string) => {
-  const { error } = await supabase.from('jobs').delete().eq('id', id);
-  if (error) console.error("Error deleting job:", error);
-};
+async function checkAndUpdateResult(
+  task: { query: string; serpapi_id: string; result_id: string },
+  targetUrl: string
+): Promise<boolean> {
+  await rateLimiter.acquire();
 
-export const clearAllJobs = async () => {
-    console.warn("clearAllJobs is not implemented for safety.");
-};
+  try {
+    const response = await withTimeout(
+      fetch('/api/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          serpapi_id: task.serpapi_id, 
+          targetUrl 
+        })
+      }),
+      CONFIG.MAX_EXECUTION_TIME,
+      'Check API timeout'
+    );
 
-export const saveResultsToDb = async (jobId: string, results: TrackingResult[]) => {
-    // Legacy function, might not be used with async flow but keeping for compatibility if needed
-    // or if we ever save results in bulk.
-    // For async flow, we use savePendingTasks and updateResultRow.
-    console.warn("saveResultsToDb called in async architecture context - verify usage.");
-};
+    if (!response.ok) {
+      throw new Error(`Check API failed: ${response.status}`);
+    }
 
-// NEW: Helper to save initial pending rows
-const savePendingTasks = async (tasks: any[]) => {
-  const { error } = await supabase.from('results').insert(tasks);
-  if (error) console.error('Error saving pending tasks:', error);
-};
+    const data = await response.json();
 
-// NEW: Helper to update a single row when check is complete
-const updateResultRow = async (serpapi_id: string, data: any) => {
-  const { error } = await supabase.from('results').update({
-    rank: data.rank,
-    search_volume: data.search_volume,
-    ai_present: data.ai_present,
-    ai_content: data.ai_content,
-    ai_sentiment: data.ai_sentiment,
-    processing_status: 'complete'
-  }).eq('serpapi_id', serpapi_id);
+    if (data.status === 'complete') {
+      // Update database
+      await supabaseHelpers.updateResult(task.result_id, {
+        rank: data.data.rank,
+        url: targetUrl,
+        search_volume: data.data.search_volume || 0,
+        ai_present: data.data.ai_present || false,
+        ai_content: data.data.ai_content || null,
+        ai_sentiment: data.data.ai_sentiment || 'neutral',
+        processing_status: 'complete'
+      });
+      
+      return true; // Complete
+    } else if (data.status === 'processing') {
+      return false; // Still processing
+    } else {
+      // Failed
+      await supabaseHelpers.updateResult(task.result_id, {
+        processing_status: 'failed'
+      });
+      return true; // Mark as complete (failed)
+    }
 
-  if (error) console.error('Error updating result row:', error);
-};
+  } catch (error) {
+    console.error(`Check failed for ${task.query}:`, error);
+    return false; // Retry
+  }
+}
 
-// --- The Main Logic: Orchestrator ---
+// ============================================================================
+// CORE: Poll Until Complete (Smart Polling)
+// ============================================================================
 
-export const createJob = async (
+async function pollUntilComplete(
+  tasks: Array<{ query: string; serpapi_id: string; result_id: string }>,
+  targetUrl: string,
+  jobId: string
+): Promise<void> {
+  let pending = [...tasks];
+  const startTime = Date.now();
+  let pollCount = 0;
+
+  while (pending.length > 0) {
+    // Safety: Check if we've exceeded max poll time
+    if (Date.now() - startTime > CONFIG.MAX_POLL_TIME) {
+      console.warn('Max poll time exceeded. Marking remaining as failed.');
+      
+      for (const task of pending) {
+        await supabaseHelpers.updateResult(task.result_id, {
+          processing_status: 'failed'
+        });
+      }
+      break;
+    }
+
+    pollCount++;
+    console.log(`Poll ${pollCount}: ${pending.length} tasks remaining`);
+
+    // Process in batches
+    const batchResults: boolean[] = [];
+    
+    for (let i = 0; i < pending.length; i += CONFIG.CHECK_BATCH_SIZE) {
+      const batch = pending.slice(i, i + CONFIG.CHECK_BATCH_SIZE);
+      
+      const results = await Promise.all(
+        batch.map(task => 
+          retryWithBackoff(
+            () => checkAndUpdateResult(task, targetUrl),
+            2,
+            `Check ${task.query}`
+          ).catch(() => false) // Don't throw, just mark as incomplete
+        )
+      );
+
+      batchResults.push(...results);
+
+      // Update progress
+      const totalTasks = tasks.length;
+      const completedTasks = totalTasks - pending.length + batchResults.filter(r => r).length;
+      const progress = Math.round((completedTasks / totalTasks) * 100);
+
+      await supabaseHelpers.updateJobStatus(jobId, 'processing', progress);
+
+      // Small delay between check batches
+      if (i + CONFIG.CHECK_BATCH_SIZE < pending.length) {
+        await delay(CONFIG.REQUEST_DELAY / 2);
+      }
+    }
+
+    // Filter out completed tasks
+    pending = pending.filter((_, idx) => !batchResults[idx]);
+
+    // Wait before next poll round
+    if (pending.length > 0) {
+      await delay(CONFIG.CHECK_INTERVAL);
+    }
+  }
+}
+
+// ============================================================================
+// MAIN: Create Job (Orchestrator)
+// ============================================================================
+
+export async function createJob(
   targetUrl: string,
   queries: string[],
   location: string,
   device: 'desktop' | 'mobile',
-  searchMode: string
-): Promise<TrackingJob | null> => {
-  // 1. Create Job Parent
-  const jobId = await createJobInDb(targetUrl, queries, location, device, searchMode);
-  if (!jobId) throw new Error("Failed to DB init");
+  searchMode: SearchMode
+): Promise<TrackingJob | null> {
+  console.log('🚀 Creating tracking job:', { targetUrl, queries: queries.length, searchMode });
 
-  // 2. Start Async Processing (Fire & Forget from UI perspective)
-  runAsyncWorkflow(jobId, targetUrl, queries, location, searchMode);
-
-  return {
-    id: jobId,
-    targetUrl,
-    queries,
-    location,
-    device,
-    searchMode: searchMode as any,
-    status: 'processing',
-    progress: 0,
-    createdAt: new Date().toISOString(),
-    results: []
-  };
-};
-
-const runAsyncWorkflow = async (jobId: string, targetUrl: string, queries: string[], location: string, searchMode: string) => {
   try {
-    // Phase A: "Start" - Get Tickets
-    const startRes = await fetch('/api/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId, queries, location, searchMode })
-    });
-
-    if (!startRes.ok) throw new Error(`Start failed: ${startRes.statusText}`);
-
-    const startData = await startRes.json();
-
-    // Save Tickets to DB
-    if (startData.tasks) {
-      await savePendingTasks(startData.tasks);
+    // HARD LIMIT: Max 5 keywords for Vercel Hobby
+    if (queries.length > CONFIG.MAX_KEYWORDS_PER_JOB) {
+      throw new Error(`Maximum ${CONFIG.MAX_KEYWORDS_PER_JOB} keywords allowed per job`);
     }
 
-    // Phase B: "Check" - The Polling Loop
-    let pending = [...(startData.tasks || [])];
-
-    // Loop until all are processed
-    while (pending.length > 0) {
-      const currentTask = pending.shift(); // Take one
-
-      const checkRes = await fetch('/api/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serpapi_id: currentTask.serpapi_id, targetUrl })
-      });
-
-      if (!checkRes.ok) {
-          console.error("Check failed for", currentTask.serpapi_id);
-          continue;
-      }
-
-      const checkData = await checkRes.json();
-
-      if (checkData.status === 'complete') {
-        // 1. Save data to DB
-        await updateResultRow(currentTask.serpapi_id, checkData.data);
-      } else if (checkData.status === 'processing') {
-        // 2. Not ready? Put back in queue and wait a bit
-        pending.push(currentTask);
-        await new Promise(r => setTimeout(r, 2000)); // Wait 2s before next check
-      } else {
-        // Error case
-        console.error('Task failed', currentTask);
-        // We could update DB to failed status here
-        await supabase.from('results').update({ processing_status: 'failed' }).eq('serpapi_id', currentTask.serpapi_id);
-      }
-
-      // Tiny delay to keep CPU usage low
-      await new Promise(r => setTimeout(r, 500));
+    if (queries.length === 0) {
+      throw new Error('At least one keyword required');
     }
 
-    // Done!
-    await markJobComplete(jobId);
+    // 1. Create job in database
+    const job = await supabaseHelpers.createJob(
+      targetUrl,
+      queries,
+      location,
+      device,
+      searchMode
+    );
 
-  } catch (e) {
-    console.error("Workflow failed", e);
-    await markJobFailed(jobId);
+    if (!job) {
+      throw new Error('Failed to create job in database');
+    }
+
+    console.log('✅ Job created:', job.id);
+
+    // 2. Start async workflow (non-blocking)
+    runAsyncWorkflow(job.id, targetUrl, queries, location, searchMode)
+      .then(() => console.log('✅ Workflow completed:', job.id))
+      .catch(err => console.error('❌ Workflow failed:', job.id, err));
+
+    return job;
+
+  } catch (error) {
+    console.error('Error creating job:', error);
+    return null;
   }
-};
+}
 
-// --- Fetching for Dashboard ---
+// ============================================================================
+// WORKFLOW: Async Background Processing
+// ============================================================================
 
-export const getJobsFromDb = async (): Promise<TrackingJob[]> => {
-  const { data: jobs, error } = await supabase
-    .from('jobs')
-    .select(`*, results(*)`)
-    .order('created_at', { ascending: false });
+async function runAsyncWorkflow(
+  jobId: string,
+  targetUrl: string,
+  queries: string[],
+  location: string,
+  searchMode: SearchMode
+): Promise<void> {
+  console.log('🔄 Starting async workflow for job:', jobId);
 
-  if (error) {
-    console.error("Error fetching jobs:", error);
+  try {
+    // Update job status
+    await supabaseHelpers.updateJobStatus(jobId, 'processing', 0);
+
+    // Phase 1: Start all searches (get SerpAPI IDs)
+    console.log('📡 Phase 1: Starting searches...');
+    const tasks = await startAsyncSearches(jobId, queries, location, searchMode);
+    
+    if (tasks.length === 0) {
+      throw new Error('No tasks were created');
+    }
+
+    console.log(`✅ Started ${tasks.length} searches`);
+
+    // Phase 2: Poll until all complete
+    console.log('⏳ Phase 2: Polling for results...');
+    await pollUntilComplete(tasks, targetUrl, jobId);
+
+    // Mark job as complete
+    await supabaseHelpers.updateJobStatus(jobId, 'completed', 100);
+    console.log('🎉 Job completed:', jobId);
+
+  } catch (error) {
+    console.error('❌ Workflow error:', error);
+    await supabaseHelpers.updateJobStatus(jobId, 'failed');
+  }
+}
+
+// ============================================================================
+// DATABASE: Get Jobs
+// ============================================================================
+
+export async function getJobs(): Promise<TrackingJob[]> {
+  try {
+    return await supabaseHelpers.getAllJobs(50);
+  } catch (error) {
+    console.error('Error fetching jobs:', error);
     return [];
   }
+}
 
-  return jobs.map((j: any) => {
-     // Calculate progress based on processing_status
-     const totalResults = j.results ? j.results.length : 0;
-     const completedResults = j.results ? j.results.filter((r: any) => r.processing_status === 'complete').length : 0;
-     const progress = j.status === 'completed' ? 100 : (totalResults > 0 ? Math.round((completedResults / totalResults) * 100) : 0);
+// ============================================================================
+// DATABASE: Get Single Job
+// ============================================================================
 
-     return {
-        id: j.id,
-        targetUrl: j.target_url,
-        queries: j.results ? j.results.map((r: any) => r.query) : [],
-        location: j.location,
-        device: j.device,
-        searchMode: j.search_mode,
-        status: j.status,
-        progress: progress,
-        createdAt: j.created_at,
-        results: j.results ? j.results.map((r: any) => ({
-          query: r.query,
-          rank: r.rank,
-          url: r.url,
-          searchVolume: r.search_volume,
-          aiOverview: {
-            present: r.ai_present,
-            content: r.ai_content,
-            sentiment: r.ai_sentiment
-          },
-          history: [],
-          competitors: [],
-          serpFeatures: []
-        })) : []
-     };
-  });
+export async function getJobById(jobId: string): Promise<TrackingJob | null> {
+  try {
+    return await supabaseHelpers.getJobById(jobId);
+  } catch (error) {
+    console.error('Error fetching job:', error);
+    return null;
+  }
+}
+
+// ============================================================================
+// DATABASE: Delete Job
+// ============================================================================
+
+export async function deleteJob(jobId: string): Promise<boolean> {
+  try {
+    return await supabaseHelpers.deleteJob(jobId);
+  } catch (error) {
+    console.error('Error deleting job:', error);
+    return false;
+  }
+}
+
+// ============================================================================
+// COMPATIBILITY: Legacy Functions
+// ============================================================================
+
+export const getJobsFromDb = getJobs;
+export const clearAllJobs = async () => {
+  console.warn('clearAllJobs is disabled for safety');
+  return false;
 };
 
-// Alias for compatibility
-export const getJobs = getJobsFromDb;
+// ============================================================================
+// EXPORT ALL
+// ============================================================================
+
+export default {
+  createJob,
+  getJobs,
+  getJobById,
+  deleteJob,
+  getJobsFromDb,
+  clearAllJobs,
+};
